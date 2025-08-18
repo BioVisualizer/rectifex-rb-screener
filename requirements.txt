@@ -1,0 +1,7 @@
+PyQt6
+pandas
+yfinance
+lxml
+openpyxl
+matplotlib
+mplfinance
