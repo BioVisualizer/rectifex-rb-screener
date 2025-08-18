@@ -38,15 +38,18 @@ flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flat
 ```
 
 ### 3. Clone the Repository
-Download the source code from GitHub using the following command.
+Download the source code from your GitHub repository.
 
 ```bash
-git clone https://github.com/BioVisualizer/Rectifex-RB-Global-Rebound-Stock-Screener.git
-cd Rectifex-RB-Global-Rebound-Stock-Screener
+# Replace <YOUR_REPOSITORY_URL> with the actual URL from GitHub
+git clone <YOUR_REPOSITORY_URL>
+
+# Replace <REPOSITORY_FOLDER> with the name of the folder created by the clone command
+cd <REPOSITORY_FOLDER>
 ```
 
 ### 4. Build and Install the Application
-Navigate to the project's root directory (where `flathub.json` is located) and run the following command:
+From the project's root directory (where `flathub.json` is located), run the following command:
 
 ```bash
 flatpak-builder build-dir flathub.json --user --install --force-clean
@@ -56,7 +59,7 @@ flatpak-builder build-dir flathub.json --user --install --force-clean
 *   `--install`: Installs the application after a successful build.
 *   `--force-clean`: Deletes the build directory after completion to save space.
 
-### 4. Run the Application
+### 5. Run the Application
 After the installation is complete, you can find "Rectifex RB" in your application menu (e.g., the Kicker in Kubuntu).
 
 Alternatively, you can run it from the command line:
