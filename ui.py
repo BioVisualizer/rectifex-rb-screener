@@ -63,31 +63,40 @@ class AnalysisWorker(QObject):
 # --- Pandas DataFrame Model for QTableView ---
 
 class PandasModel(QAbstractTableModel):
-    """A model to interface a pandas DataFrame with a QTableView."""
+    """
+    A model to interface a pandas DataFrame with a QTableView.
+    This model provides the data and header information required by the view,
+    and handles sorting when a column header is clicked. It also provides
+    conditional background coloring for rows based on the 'Score'.
+    """
     def __init__(self, data=pd.DataFrame(), parent=None):
         super().__init__(parent)
         self._data = data
 
     def rowCount(self, parent=None):
+        """Returns the number of rows in the model."""
         return self._data.shape[0]
 
     def columnCount(self, parent=None):
+        """Returns the number of columns in the model."""
         return self._data.shape[1]
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        """Returns the data at the given index for the given role."""
         if index.isValid():
             if role == Qt.ItemDataRole.DisplayRole:
                 return str(self._data.iloc[index.row(), index.column()])
             if role == Qt.ItemDataRole.BackgroundRole:
-                # Color rows based on Score
+                # Color rows based on the 'Score' value for visual emphasis.
                 score = self._data.iloc[index.row()]["Score"]
                 if score > 80:
-                    return QColor("#d4edda") # Light green
+                    return QColor("#d4edda")  # Light green for high scores
                 elif score > 60:
-                    return QColor("#fff3cd") # Light yellow
+                    return QColor("#fff3cd")  # Light yellow for medium scores
         return None
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        """Returns the header data for the given section."""
         if role == Qt.ItemDataRole.DisplayRole:
             if orientation == Qt.Orientation.Horizontal:
                 return str(self._data.columns[section])
@@ -96,34 +105,44 @@ class PandasModel(QAbstractTableModel):
         return None
 
     def sort(self, column, order):
+        """Sorts the model by the given column and order."""
         colname = self._data.columns[column]
         self.layoutAboutToBeChanged.emit()
         self._data.sort_values(colname, ascending=(order == Qt.SortOrder.AscendingOrder), inplace=True)
         self.layoutChanged.emit()
 
     def get_dataframe(self):
+        """Returns the underlying pandas DataFrame."""
         return self._data
 
 
 # --- Charting Window ---
 
 class ChartWindow(QWidget):
-    """A separate window to display a stock chart."""
+    """
+    A separate window for displaying a detailed stock chart for a given ticker.
+    It shows a candlestick chart, 200-day SMA, and an RSI indicator panel.
+    """
     def __init__(self, ticker):
         super().__init__()
         self.ticker = ticker
         self.setWindowTitle(f"Chart for {self.ticker} - {config.APP_NAME}")
         self.setGeometry(150, 150, 800, 600)
 
+        # Setup the Matplotlib canvas
         layout = QVBoxLayout()
         self.setLayout(layout)
-
         self.canvas = FigureCanvas(Figure(figsize=(8, 6)))
         layout.addWidget(self.canvas)
 
+        # Load and render the chart
         self.load_chart_data()
 
     def load_chart_data(self):
+        """
+        Fetches stock data, calculates indicators, and plots the chart
+        using mplfinance, embedded within the PyQt widget.
+        """
         data = data_loader.get_stock_data(self.ticker)
         if data is None or data.empty:
             QMessageBox.warning(self, "Data Error", f"Could not load data for {self.ticker}.")
@@ -136,97 +155,43 @@ class ChartWindow(QWidget):
         data['SMA200'] = analysis.calculate_sma(data['Close'], config.SMA_SUPPORT_PERIOD)
         data['RSI'] = analysis.calculate_rsi(data['Close'], config.RSI_PERIOD)
 
-        # Create plot using mplfinance
-        # Define the additional plots for SMA and RSI
+        # Define an additional plot for the 200-day SMA
         ap0 = [
             mpf.make_addplot(data['SMA200'], color='blue', width=0.7),
         ]
 
-        # RSI plot in a separate panel
-        panel1 = mpf.make_addplot(data['RSI'], panel=1, color='orange', ylabel='RSI')
-
-        # Create figure and axes using the canvas
+        # This is the most robust method for embedding mplfinance in PyQt.
+        # It creates two subplots (axes) and passes them to mplfinance.
         fig = self.canvas.figure
-        fig.clf() # Clear previous plots
+        fig.clf() # Clear any previous plots
 
-        # mplfinance needs axes to plot on
-        ax1 = fig.add_subplot(2, 1, 1)
-        ax2 = fig.add_subplot(2, 1, 2, sharex=ax1) # RSI panel shares x-axis
-        ax1.set_ylabel('Price ($)')
-
-        mpf.plot(
-            data,
-            type='candle',
-            style='yahoo',
-            title=f'{self.ticker} - {config.CHART_HISTORY_MONTHS} Months',
-            ax=ax1,
-            addplot=[mpf.make_addplot(data['SMA200'], ax=ax1), mpf.make_addplot(data['RSI'], panel=1, ax=ax2)],
-            volume=True,
-            panel_ratios=(3, 1) # Main panel is 3x taller than volume panel
-        )
-        # Manually plotting on axes is complex with mpf, this is a known issue.
-        # Let's try the direct `ax` kwarg which is simpler.
-        fig.clf()
-        mpf.plot(
-            data,
-            type='candle',
-            style='charles', # A style that works well
-            title=f'{self.ticker} - {config.CHART_HISTORY_MONTHS} Months',
-            ylabel='Price ($)',
-            addplot=ap0,
-            figscale=1.2,
-            figratio=(10, 6),
-            panel_ratios=(6,1), # Price/Volume
-            volume=True,
-            ax=self.canvas.figure.subplots(2, 1, sharex=True, gridspec_kw={'height_ratios': [3, 1]})[0].twinx(),
-            # The above is too complex, let's use the simpler `returnfig` method.
-        )
-        fig.clear() # Clear again
-
-        # Simpler approach: let mplfinance create the figure
-        fig, axes = mpf.plot(
-            data,
-            type='candle',
-            style='yahoo',
-            title=f'{self.ticker} - {config.CHART_HISTORY_MONTHS} Months',
-            ylabel='Price ($)',
-            addplot=ap0,
-            volume=True,
-            panel_ratios=(3, 1),
-            returnfig=True # This returns the figure and axes
-        )
-
-        # Add RSI plot manually to a new axis
-        ax2 = fig.add_axes([axes[0].get_position().x0, 0.1, axes[0].get_position().width, 0.2])
-        ax2.plot(data.index, data['RSI'], color='orange')
-        ax2.axhline(70, color='red', linestyle='--')
-        ax2.axhline(30, color='green', linestyle='--')
-        ax2.set_ylabel('RSI (14)')
-        ax2.grid(True)
-
-        # This is getting complicated. Let's try the official recommended way for external axes.
-        fig.clear()
-
-        # Final attempt with the most robust method for embedding
-        ax1 = self.canvas.figure.add_subplot(3, 1, (1, 2))
-        ax2 = self.canvas.figure.add_subplot(3, 1, 3, sharex=ax1)
+        ax1 = fig.add_subplot(3, 1, (1, 2)) # Main plot for price and volume
+        ax2 = fig.add_subplot(3, 1, 3, sharex=ax1) # Shared X-axis for RSI
         ax1.set_ylabel('Price')
         ax2.set_ylabel('RSI')
 
-        mpf.plot(data, type='candle', ax=ax1, volume=ax1.twinx(), addplot=ap0, style='yahoo')
+        # Plot candlesticks, volume, and SMA on the first axis
+        mpf.plot(data, type='candle', ax=ax1, volume=ax1.twinx(), addplot=ap0, style='yahoo',
+                 title=f'{self.ticker} - {config.CHART_HISTORY_MONTHS} Months')
+
+        # Plot RSI on the second axis
         ax2.plot(data.index, data['RSI'], color='orange')
         ax2.axhline(70, color='red', linestyle='--', linewidth=0.5)
         ax2.axhline(30, color='green', linestyle='--', linewidth=0.5)
         ax2.set_ylim(0, 100)
         ax2.grid(True)
 
-        self.canvas.figure.tight_layout()
+        fig.tight_layout()
         self.canvas.draw()
 
 
 # --- Main Application Window ---
 
 class MainWindow(QMainWindow):
+    """
+    The main window of the application. It contains the controls, results table,
+    and status bar. It manages the background thread for running the analysis.
+    """
     def __init__(self):
         super().__init__()
         self.setWindowTitle(config.APP_NAME)
@@ -287,8 +252,20 @@ class MainWindow(QMainWindow):
         self.thread.finished.connect(self.thread.deleteLater)
         self.worker.signals.result.connect(self.display_results)
         self.worker.signals.progress.connect(self.update_status)
+        self.worker.signals.error.connect(self.scan_error)
 
         self.thread.start()
+
+    def scan_error(self, error_info):
+        """Shows a dialog box when an error occurs during the scan."""
+        exctype, value, tb = error_info
+        self.status_bar.showMessage(f"Fehler beim Scan: {value}")
+        self.scan_button.setEnabled(True) # Re-enable button on error
+        QMessageBox.critical(
+            self,
+            "Scan-Fehler",
+            f"Ein unerwarteter Fehler ist aufgetreten:\n\n{value}\n\nTraceback:\n{tb}"
+        )
 
     def update_status(self, message):
         self.status_bar.showMessage(message)

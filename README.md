@@ -85,3 +85,7 @@ To expand the number of scanned tickers, particularly for the STOXX 600 and Nikk
 *   For other European exchanges, the suffix varies (e.g., `.PA` for Paris, `.L` for London, `.MI` for Milan).
 
 By manually curating these lists, you have full control over the stock universe the application analyzes.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
