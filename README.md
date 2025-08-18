@@ -38,14 +38,11 @@ flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flat
 ```
 
 ### 3. Clone the Repository
-Download the source code from your GitHub repository.
+Download the source code from GitHub using the following command.
 
 ```bash
-# Replace <YOUR_REPOSITORY_URL> with the actual URL from GitHub
-git clone <YOUR_REPOSITORY_URL>
-
-# Replace <REPOSITORY_FOLDER> with the name of the folder created by the clone command
-cd <REPOSITORY_FOLDER>
+git clone https://github.com/BioVisualizer/rectifex-rb-screener.git
+cd rectifex-rb-screener
 ```
 
 ### 4. Build and Install the Application
