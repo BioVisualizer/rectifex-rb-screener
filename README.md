@@ -18,6 +18,44 @@ The application is built with Python and PyQt6, and it is designed to be package
     *   Pop-up chart window for visual analysis of any candidate.
     *   Export results to CSV or Excel (XLSX).
 
+## Installation and Usage (from Source)
+
+These instructions explain how to build and install the application on a Debian-based system like Kubuntu using the provided Flatpak manifest.
+
+### 1. Install Prerequisites
+First, you need to install `flatpak` and `flatpak-builder`.
+
+```bash
+sudo apt update
+sudo apt install flatpak flatpak-builder
+```
+
+### 2. Add Flathub Remote
+Flathub is the main repository for Flatpak applications and runtimes. You need to add it to download the KDE SDK, which is required for the build.
+
+```bash
+flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+```
+
+### 3. Build and Install the Application
+Navigate to the project's root directory (where `flathub.json` is located) and run the following command:
+
+```bash
+flatpak-builder build-dir flathub.json --user --install --force-clean
+```
+*   `build-dir`: A temporary directory where the build will take place.
+*   `--user`: Installs the application for the current user.
+*   `--install`: Installs the application after a successful build.
+*   `--force-clean`: Deletes the build directory after completion to save space.
+
+### 4. Run the Application
+After the installation is complete, you can find "Rectifex RB" in your application menu (e.g., the Kicker in Kubuntu).
+
+Alternatively, you can run it from the command line:
+```bash
+flatpak run com.rectifex.GlobalReboundScreener
+```
+
 ## How to Extend the Stock Universe
 
 The application's stock universe is determined by the ticker lists it loads on startup. While it attempts to scrape the latest lists from Wikipedia for US and German indices, the most reliable way to manage and expand the lists for European and Japanese markets is by editing the local CSV files.
