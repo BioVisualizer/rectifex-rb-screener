@@ -37,7 +37,15 @@ Flathub is the main repository for Flatpak applications and runtimes. You need t
 flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 ```
 
-### 3. Build and Install the Application
+### 3. Clone the Repository
+Download the source code from GitHub using the following command.
+
+```bash
+git clone https://github.com/BioVisualizer/Rectifex-RB-Global-Rebound-Stock-Screener.git
+cd Rectifex-RB-Global-Rebound-Stock-Screener
+```
+
+### 4. Build and Install the Application
 Navigate to the project's root directory (where `flathub.json` is located) and run the following command:
 
 ```bash
