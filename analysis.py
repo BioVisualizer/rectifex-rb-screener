@@ -57,6 +57,50 @@ def passes_market_context_filter(index_data: pd.DataFrame) -> bool:
 
     return latest_price > latest_sma
 
+import json
+from datetime import datetime, timedelta
+
+def get_ticker_info_cached(ticker: str) -> dict | None:
+    """
+    Gets fundamental info for a ticker, using a local JSON cache.
+    The cache is valid for the same duration as the price data.
+    """
+    info_cache_dir = config.CACHE_DIR / "info"
+    info_cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = info_cache_dir / f"{ticker}.json"
+
+    # Check for a valid cache file
+    if cache_file.exists():
+        mod_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
+        if datetime.now() - mod_time < timedelta(hours=config.CACHE_EXPIRY_HOURS):
+            logging.info(f"Loading {ticker} INFO from cache.")
+            try:
+                with open(cache_file, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                logging.warning(f"Could not read info cache for {ticker}, refetching. Error: {e}")
+
+    # If no valid cache, fetch from yfinance
+    logging.info(f"Downloading {ticker} INFO from yfinance.")
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+
+        # yfinance can return empty info dicts for some tickers
+        if not info or info.get('marketCap') is None:
+            logging.warning(f"No valid info returned from yfinance for {ticker}")
+            return None
+
+        with open(cache_file, 'w') as f:
+            json.dump(info, f)
+
+        return info
+    except Exception as e:
+        # yfinance often throws errors for delisted/invalid tickers, which is expected.
+        logging.warning(f"Could not download info for {ticker}: {e}")
+        return None
+
+
 def passes_liquidity_filter(ticker_info: dict) -> bool:
     """
     Checks if a stock meets the minimum market cap and volume requirements.
@@ -69,7 +113,7 @@ def passes_liquidity_filter(ticker_info: dict) -> bool:
     # We use 'averageVolume' as a proxy for the 30-day average volume.
     avg_volume = ticker_info.get('averageVolume', 0)
 
-    if market_cap > config.MIN_MARKET_CAP and avg_volume > config.MIN_AVG_VOLUME_30D:
+    if market_cap and avg_volume and market_cap > config.MIN_MARKET_CAP and avg_volume > config.MIN_AVG_VOLUME_30D:
         return True
     return False
 
@@ -197,7 +241,8 @@ def run_analysis(progress_callback=None):
             emit_progress(f"Analyzing [{processed_tickers}/{total_tickers}] ({progress_percent}%) {ticker}...")
 
             try:
-                stock_info = yf.Ticker(ticker).info
+                # 1. Liquidity Filter (with caching)
+                stock_info = get_ticker_info_cached(ticker)
                 if not passes_liquidity_filter(stock_info):
                     continue
 
