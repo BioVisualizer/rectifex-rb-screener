@@ -3,14 +3,15 @@
     "runtime": "org.kde.Platform",
     "runtime-version": "6.7",
     "sdk": "org.kde.Sdk",
-    "command": "python3 main.py",
+    "command": "python3",
+    "args": ["main.py"],
     "finish-args": [
         "--share=network",
         "--filesystem=home"
     ],
     "modules": [
         {
-            "name": "python-deps",
+            "name": "rectifex-rb",
             "buildsystem": "simple",
             "build-options": {
                 "build-args": [
@@ -18,19 +19,7 @@
                 ]
             },
             "build-commands": [
-                "pip3 install --prefix=/app --no-cache-dir -r requirements.txt"
-            ],
-            "sources": [
-                {
-                    "type": "file",
-                    "path": "requirements.txt"
-                }
-            ]
-        },
-        {
-            "name": "rectifex-rb",
-            "buildsystem": "simple",
-            "build-commands": [
+                "pip3 install --prefix=/app --no-cache-dir -r requirements.txt",
                 "install -D main.py /app/main.py",
                 "install -D ui.py /app/ui.py",
                 "install -D analysis.py /app/analysis.py",
@@ -39,7 +28,10 @@
                 "cp -r data /app/"
             ],
             "sources": [
-                { "type": "dir", "path": "." }
+                {
+                    "type": "dir",
+                    "path": "."
+                }
             ]
         }
     ]
