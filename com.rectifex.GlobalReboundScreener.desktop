@@ -7,3 +7,4 @@ Terminal=false
 Type=Application
 Categories=Office;Finance;
 StartupNotify=true
+StartupWMClass=Rectifex RB - Global Rebound Stock Screener

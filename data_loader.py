@@ -29,25 +29,31 @@ import re
 def _get_tickers_from_wiki(index_details: dict) -> list[str] | None:
     """
     Tries to scrape a list of tickers from a Wikipedia page.
+    Uses a standard browser User-Agent to avoid HTTP 403 Forbidden errors.
     Includes special handling for pages that don't use a standard table.
     """
     try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0'
+        }
         logging.info(f"Attempting to scrape tickers for {index_details['name']} from {index_details['wiki_url']}")
+
+        response = requests.get(index_details['wiki_url'], headers=headers)
+        response.raise_for_status() # Will raise an exception for 4xx/5xx errors
+        html_content = response.text
 
         # Special parser for Nikkei 225, which lists components in plain text.
         if index_details['name'] == "Nikkei 225":
-            html_content = requests.get(index_details['wiki_url']).text
-            # Regex to find all 4-digit codes in "(TYO: xxxx)"
             tickers = re.findall(r'\(TYO:\s*(\d{4})\)', html_content)
             if tickers:
-                logging.info(f"Successfully scraped {len(tickers)} tickers for {index_details['name']} using special parser.")
+                logging.info(f"Successfully scraped {len(tickers)} tickers for {index_details['name']} using regex parser.")
                 return tickers
             else:
-                logging.warning("Nikkei 225 special parser failed to find tickers.")
-                return None
+                logging.warning("Nikkei 225 regex parser failed to find tickers.")
+                # Fall through to standard table parser as a backup
 
         # Standard parser using pandas.read_html for table-based component lists.
-        tables = pd.read_html(index_details['wiki_url'])
+        tables = pd.read_html(html_content)
 
         ticker_col_names = ['Ticker', 'Symbol', 'Ticker symbol']
 
@@ -55,8 +61,9 @@ def _get_tickers_from_wiki(index_details: dict) -> list[str] | None:
             for col_name in ticker_col_names:
                 if col_name in table.columns:
                     tickers = table[col_name].dropna().tolist()
-                    tickers = [t.split(' ')[0] for t in tickers]
-                    logging.info(f"Successfully scraped {len(tickers)} tickers for {index_details['name']}.")
+                    # Clean tickers: remove annotations like "(class A)"
+                    tickers = [str(t).split(' ')[0] for t in tickers]
+                    logging.info(f"Successfully scraped {len(tickers)} tickers for {index_details['name']} using table parser.")
                     return tickers
 
         logging.warning(f"Could not find a valid ticker column in any table for {index_details['name']}.")
