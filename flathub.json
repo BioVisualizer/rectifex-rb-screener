@@ -7,6 +7,8 @@
     "finish-args": [
         "--share=network",
         "--filesystem=home",
+        "--socket=x11",
+        "--socket=wayland",
         "--device=dri"
     ],
     "modules": [
