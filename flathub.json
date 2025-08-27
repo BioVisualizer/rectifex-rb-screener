@@ -26,7 +26,9 @@
                 "install -D analysis.py /app/analysis.py",
                 "install -D data_loader.py /app/data_loader.py",
                 "install -D config.py /app/config.py",
-                "cp -r data /app/"
+                "cp -r data /app/",
+                "install -D com.rectifex.GlobalReboundScreener.desktop /app/share/applications/com.rectifex.GlobalReboundScreener.desktop",
+                "install -D Rectifex_RB_Icon.svg /app/share/icons/hicolor/scalable/apps/com.rectifex.GlobalReboundScreener.svg"
             ],
             "sources": [
                 {

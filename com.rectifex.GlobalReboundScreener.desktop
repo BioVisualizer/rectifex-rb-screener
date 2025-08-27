@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Rectifex RB
+Comment=Global Rebound Stock Screener
+Exec=start.sh
+Icon=com.rectifex.GlobalReboundScreener
+Terminal=false
+Type=Application
+Categories=Office;Finance;
+StartupNotify=true
