@@ -208,7 +208,7 @@ class MainWindow(QMainWindow):
         # Top bar for controls
         controls_layout = QHBoxLayout()
         self.scan_button = QPushButton("Scan starten")
-        self.help_button = QPushButton("Hilfe")
+        self.help_button = QPushButton("Help")
         self.export_csv_button = QPushButton("Export to CSV")
         self.export_excel_button = QPushButton("Export to XLSX")
         self.export_csv_button.setEnabled(False)
