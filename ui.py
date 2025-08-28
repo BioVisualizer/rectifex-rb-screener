@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import (
     QObject, QThread, pyqtSignal, QAbstractTableModel, Qt, QSortFilterProxyModel
 )
-from PyQt.QtGui import QColor, QIcon
+from PyQt6.QtGui import QColor, QIcon
 
 # For charting
 import matplotlib
