@@ -208,6 +208,7 @@ class MainWindow(QMainWindow):
         # Top bar for controls
         controls_layout = QHBoxLayout()
         self.scan_button = QPushButton("Scan starten")
+        self.help_button = QPushButton("Hilfe")
         self.export_csv_button = QPushButton("Export to CSV")
         self.export_excel_button = QPushButton("Export to XLSX")
         self.export_csv_button.setEnabled(False)
@@ -217,6 +218,7 @@ class MainWindow(QMainWindow):
         controls_layout.addStretch()
         controls_layout.addWidget(self.export_csv_button)
         controls_layout.addWidget(self.export_excel_button)
+        controls_layout.addWidget(self.help_button)
 
         # Results table
         self.table_view = QTableView()
@@ -232,9 +234,20 @@ class MainWindow(QMainWindow):
 
         # --- Connections ---
         self.scan_button.clicked.connect(self.start_scan)
+        self.help_button.clicked.connect(self.show_about_dialog)
         self.table_view.doubleClicked.connect(self.open_chart_for_selection)
         self.export_csv_button.clicked.connect(self.export_to_csv)
         self.export_excel_button.clicked.connect(self.export_to_excel)
+
+    def show_about_dialog(self):
+        """Shows the 'About' dialog with application info and credits."""
+        about_text = f"""
+        <b>{config.APP_NAME}</b>
+        <p>Version 1.0</p>
+        <p>This application scans global stock markets to identify potential long-rebound candidates based on technical analysis criteria.</p>
+        <p>This application was developed by Lukas Morcinek.</p>
+        """
+        QMessageBox.about(self, f"Über {config.APP_NAME}", about_text)
 
     def start_scan(self):
         """Sets up and starts the analysis worker thread."""
@@ -286,6 +299,13 @@ class MainWindow(QMainWindow):
             proxy_model.setSourceModel(model)
             self.table_view.setModel(proxy_model)
             self.table_view.resizeColumnsToContents()
+
+            # Automatically sort by the 'Score' column, descending
+            try:
+                score_col_index = self.results_df.columns.get_loc("Score")
+                self.table_view.sortByColumn(score_col_index, Qt.SortOrder.DescendingOrder)
+            except KeyError:
+                logging.warning("Could not find 'Score' column for auto-sorting.")
 
         # Enable export buttons if there are results
         has_results = not self.results_df.empty

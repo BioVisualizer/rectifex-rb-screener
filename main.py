@@ -18,6 +18,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("RectifexRB")
+    app.setStyle("Fusion")
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
