@@ -163,13 +163,14 @@ def check_core_signal(data: pd.DataFrame) -> tuple[bool, float, float, float]:
 
 # --- 3. Scoring Function ---
 
-def calculate_rebound_score(rsi: float, dist_to_sma: float, dist_to_low: float) -> int:
+def calculate_rebound_score(rsi: float, dist_to_sma: float, dist_to_low: float) -> tuple[int, int, int]:
     """
-    Calculates the rebound score based on RSI and proximity to support.
+    Calculates the rebound score and its components based on RSI and proximity to support.
+    Returns the final score, the RSI sub-score, and the proximity sub-score.
     """
     # RSI Score
     rsi_score = max(0, (config.RSI_SCORE_CEILING - rsi) * (100 / (config.RSI_SCORE_CEILING - config.RSI_OVERSOLD_STRONG)))
-    rsi_score = min(100, rsi_score) # Cap at 100
+    rsi_score = int(min(100, rsi_score))
 
     # Proximity Score
     # Use the distance to the *closer* of the two valid support levels
@@ -184,16 +185,16 @@ def calculate_rebound_score(rsi: float, dist_to_sma: float, dist_to_low: float) 
     else:
         proximity_score = (config.PROXIMITY_SCORE_CEILING - prox_dist) * (100 / config.PROXIMITY_SCORE_CEILING)
 
-    proximity_score = max(0, min(100, proximity_score))
+    proximity_score = int(max(0, min(100, proximity_score)))
 
     # Final weighted score
-    final_score = (0.6 * rsi_score) + (0.4 * proximity_score)
+    final_score = int((0.6 * rsi_score) + (0.4 * proximity_score))
 
-    return int(final_score)
+    return final_score, rsi_score, proximity_score
 
 # --- 4. Main Analysis Pipeline ---
 
-def run_analysis(progress_callback=None):
+def run_analysis(progress_callback=None, progress_percent_callback=None):
     """
     Runs the full analysis pipeline.
     Emits progress updates via the optional progress_callback.
@@ -203,6 +204,10 @@ def run_analysis(progress_callback=None):
         logging.info(message)
         if progress_callback:
             progress_callback.emit(message)
+
+    def emit_percent(percent):
+        if progress_percent_callback:
+            progress_percent_callback.emit(percent)
 
     emit_progress("Starting global rebound scan...")
     all_tickers = data_loader.get_all_tickers()
@@ -238,7 +243,8 @@ def run_analysis(progress_callback=None):
         for i, ticker in enumerate(tickers):
             processed_tickers += 1
             progress_percent = int((processed_tickers / total_tickers) * 100)
-            emit_progress(f"Analyzing [{processed_tickers}/{total_tickers}] ({progress_percent}%) {ticker}...")
+            emit_progress(f"Analyzing [{processed_tickers}/{total_tickers}] {ticker}...")
+            emit_percent(progress_percent)
 
             try:
                 # 1. Liquidity Filter (with caching)
@@ -256,7 +262,7 @@ def run_analysis(progress_callback=None):
                     continue
 
                 emit_progress(f"!!! {ticker} is a potential candidate! Calculating score...")
-                score = calculate_rebound_score(rsi, dist_sma, dist_low)
+                score, rsi_score, prox_score = calculate_rebound_score(rsi, dist_sma, dist_low)
 
                 candidate = {
                     "Ticker": ticker,
@@ -267,6 +273,9 @@ def run_analysis(progress_callback=None):
                     "Price": round(stock_data['Close'].iloc[-1], 2),
                     "Dist_SMA(%)": round(dist_sma, 2) if dist_sma != np.inf else 'N/A',
                     "Dist_Low(%)": round(dist_low, 2) if dist_low != np.inf else 'N/A',
+                    # Hidden data for tooltips
+                    "RSI_Score": rsi_score,
+                    "Prox_Score": prox_score,
                 }
                 all_candidates.append(candidate)
                 emit_progress(f"Added {ticker} to candidates list with score {score}.")
