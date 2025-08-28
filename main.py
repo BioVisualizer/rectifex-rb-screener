@@ -17,6 +17,7 @@ def main():
         # For now, we'll proceed, but data loading might fail.
 
     app = QApplication(sys.argv)
+    app.setApplicationName("RectifexRB")
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
