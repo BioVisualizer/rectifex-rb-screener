@@ -160,7 +160,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(config.APP_NAME)
         self.setGeometry(100, 100, 1200, 800)
 
-        # Set window icon
+        # Set window icon to ensure consistency with the .desktop file.
         icon = QIcon.fromTheme("com.rectifex.GlobalReboundScreener")
         if not icon.isNull():
             self.setWindowIcon(icon)
