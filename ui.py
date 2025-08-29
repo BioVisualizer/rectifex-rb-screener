@@ -160,6 +160,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(config.APP_NAME)
         self.setGeometry(100, 100, 1200, 800)
 
+        # Set window icon
+        icon = QIcon.fromTheme("com.rectifex.GlobalReboundScreener")
+        if not icon.isNull():
+            self.setWindowIcon(icon)
+
         self.chart_windows = []
         self.results_df = pd.DataFrame()
 
