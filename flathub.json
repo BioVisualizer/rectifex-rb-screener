@@ -27,6 +27,7 @@
                 "install -D ui.py /app/ui.py",
                 "install -D analysis.py /app/analysis.py",
                 "install -D data_loader.py /app/data_loader.py",
+                "install -D ticker_manager.py /app/ticker_manager.py",
                 "install -D config.py /app/config.py",
                 "cp -r data /app/",
                 "install -D com.rectifex.GlobalReboundScreener.desktop /app/share/applications/com.rectifex.GlobalReboundScreener.desktop",
