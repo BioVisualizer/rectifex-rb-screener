@@ -101,18 +101,44 @@ def _post_process_tickers(tickers: list[str], market: str) -> list[str]:
     # US and other markets often have correct tickers from Wikipedia
     return tickers
 
+def _get_tickers_from_user_csv(index_name: str) -> list[str] | None:
+    """
+    Loads tickers from a user-defined CSV file if it exists.
+    """
+    try:
+        sanitized_name = index_name.replace(" ", "_").lower()
+        user_list_path = config.USER_TICKER_DIR / f"{sanitized_name}_user.csv"
+
+        if user_list_path.exists():
+            logging.info(f"Loading user-defined ticker list for {index_name} from {user_list_path}")
+            df = pd.read_csv(user_list_path)
+            ticker_col = 'Ticker' if 'Ticker' in df.columns else df.columns[0]
+            return df[ticker_col].dropna().tolist()
+    except Exception as e:
+        logging.error(f"Failed to read or parse user-defined CSV {user_list_path}: {e}")
+        # Fallback to default method
+        return None
+    return None
+
 def get_ticker_list(index_name: str) -> list[str]:
     """
     Gets the list of constituent tickers for a given index.
-    Tries to scrape Wikipedia first, then falls back to a local CSV.
+    It prioritizes user-defined lists, then tries scraping Wikipedia,
+    and finally falls back to a local CSV.
     """
     index_details = config.INDICES.get(index_name)
     if not index_details:
         logging.error(f"Index '{index_name}' not found in config.")
         return []
 
-    tickers = _get_tickers_from_wiki(index_details)
+    # 1. Try to load from user-defined CSV first
+    tickers = _get_tickers_from_user_csv(index_name)
 
+    # 2. If no user list, try scraping Wikipedia
+    if tickers is None:
+        tickers = _get_tickers_from_wiki(index_details)
+
+    # 3. If scraping fails, use the fallback CSV
     if tickers is None:
         tickers = _get_tickers_from_csv(index_details)
 

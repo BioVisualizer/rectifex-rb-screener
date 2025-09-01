@@ -86,6 +86,12 @@ To expand the number of scanned tickers, particularly for the STOXX 600 and Nikk
 
 By manually curating these lists, you have full control over the stock universe the application analyzes.
 
+## Disclaimer
+
+This application is intended for informational and educational purposes only. The data and analysis provided should not be considered as financial advice. Investing in stocks involves risk, including the possible loss of principal.
+
+The screening results are based on technical indicators and historical data, which are not guarantees of future performance. You should always conduct your own thorough research and consult with a qualified financial advisor before making any investment decisions. The author and contributors are not responsible for any investment losses you may incur.
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
