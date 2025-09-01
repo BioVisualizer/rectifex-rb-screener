@@ -50,7 +50,9 @@ INDICES = {
     },
 }
 
-# -- Caching Configuration --
+# -- Caching and User Data Configuration --
+APP_DATA_DIR = Path(os.path.expanduser("~")) / ".config" / "GlobalReboundScreener"
+USER_TICKER_DIR = APP_DATA_DIR / "tickers"
 CACHE_DIR = Path(os.path.expanduser("~")) / ".cache" / "GlobalReboundScreener"
 CACHE_EXPIRY_HOURS = 22 # Cache is valid for 22 hours
 

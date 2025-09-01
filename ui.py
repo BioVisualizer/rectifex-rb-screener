@@ -25,6 +25,7 @@ import mplfinance as mpf
 import config
 import data_loader
 import analysis
+from ticker_manager import TickerManagerDialog
 
 # --- Worker Thread for Running Analysis ---
 
@@ -176,6 +177,7 @@ class MainWindow(QMainWindow):
         controls_layout = QHBoxLayout()
         self.scan_button = QPushButton("Start Scan")
         self.clear_cache_button = QPushButton("Clear Cache")
+        self.manage_tickers_button = QPushButton("Manage Tickers")
         self.help_button = QPushButton("Help")
         self.export_csv_button = QPushButton("Export to CSV")
         self.export_excel_button = QPushButton("Export to XLSX")
@@ -185,6 +187,7 @@ class MainWindow(QMainWindow):
 
         controls_layout.addWidget(self.scan_button)
         controls_layout.addWidget(self.clear_cache_button)
+        controls_layout.addWidget(self.manage_tickers_button)
         controls_layout.addStretch()
         controls_layout.addWidget(self.export_csv_button)
         controls_layout.addWidget(self.export_excel_button)
@@ -206,12 +209,18 @@ class MainWindow(QMainWindow):
         # --- Connections ---
         self.scan_button.clicked.connect(self.start_scan)
         self.clear_cache_button.clicked.connect(self.clear_cache)
+        self.manage_tickers_button.clicked.connect(self.open_ticker_manager)
         self.help_button.clicked.connect(self.show_about_dialog)
         self.table_view.doubleClicked.connect(self.open_chart_for_selection)
         self.export_csv_button.clicked.connect(self.export_to_csv)
         self.export_excel_button.clicked.connect(self.export_to_excel)
 
         self.setup_header_tooltips()
+
+    def open_ticker_manager(self):
+        """Opens the Ticker Manager dialog."""
+        dialog = TickerManagerDialog(self)
+        dialog.exec()
 
     def setup_header_tooltips(self):
         """Sets tooltips for the table headers."""
@@ -231,6 +240,9 @@ class MainWindow(QMainWindow):
         <p>Version 1.0</p>
         <p>This application scans global stock markets to identify potential long-rebound candidates based on technical analysis criteria.</p>
         <p>This application was developed by Lukas Morcinek.</p>
+        <hr>
+        <p><b>Disclaimer:</b></p>
+        <p>This tool is for informational purposes only and does not constitute financial advice. The results are based on historical data and technical indicators, which do not guarantee future performance. Always conduct your own thorough research before making any investment decisions.</p>
         """
         QMessageBox.about(self, f"About {config.APP_NAME}", about_text)
 
