@@ -299,10 +299,21 @@ class ScenarioRunner:
             fundamentally_strong_tickers = {}
             for ticker, data in fundamental_data.items():
                 if data:
-                    eps_growth = data.get('earningsGrowth', 0) or 0
-                    revenue_growth = data.get('revenueGrowth', 0) or 0
-                    debt_to_equity = data.get('debtToEquity', float('inf')) or float('inf')
-                    if eps_growth > 0.10 and revenue_growth > 0.05 and debt_to_equity < 0.7:
+                    fundamental_score = 0
+
+                    eps_growth = data.get('earningsGrowth')
+                    if eps_growth is not None and eps_growth > 0.10:
+                        fundamental_score += 1
+
+                    revenue_growth = data.get('revenueGrowth')
+                    if revenue_growth is not None and revenue_growth > 0.05:
+                        fundamental_score += 1
+
+                    debt_to_equity = data.get('debtToEquity')
+                    if debt_to_equity is not None and debt_to_equity < 0.7:
+                        fundamental_score += 1
+
+                    if fundamental_score >= 2:
                         fundamentally_strong_tickers[ticker] = data
 
             if not fundamentally_strong_tickers:
