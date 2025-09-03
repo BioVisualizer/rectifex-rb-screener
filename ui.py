@@ -109,9 +109,13 @@ class PandasModel(QAbstractTableModel):
                     return QColor("#fff3cd")
 
             if role == Qt.ItemDataRole.ToolTipRole and column_name == "Score":
-                rsi_score = self._data.iloc[index.row()]["RSI_Score"]
-                prox_score = self._data.iloc[index.row()]["Prox_Score"]
-                return f"Score Breakdown:\n- RSI Score: {rsi_score} / 60\n- Proximity Score: {prox_score} / 40"
+                # Check if the score breakdown columns exist for this row
+                if 'RSI_Score' in self._data.columns and 'Prox_Score' in self._data.columns:
+                    rsi_score = self._data.iloc[index.row()]["RSI_Score"]
+                    prox_score = self._data.iloc[index.row()]["Prox_Score"]
+                    # Also check if they are not NaN or some other placeholder
+                    if pd.notna(rsi_score) and pd.notna(prox_score):
+                        return f"Score Breakdown:\n- RSI Score: {rsi_score} / 60\n- Proximity Score: {prox_score} / 40"
         return None
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
@@ -370,6 +374,9 @@ class MainWindow(QMainWindow):
                 "Price": r.technicals.get('price', 'N/A'),
                 "EPS-Wachstum": f"{r.fundamentals.get('earningsGrowth', 0) * 100:.2f}%" if r.fundamentals.get('earningsGrowth') is not None else "N/A",
                 "Umsatzwachstum": f"{r.fundamentals.get('revenueGrowth', 0) * 100:.2f}%" if r.fundamentals.get('revenueGrowth') is not None else "N/A",
+                # Add sub-scores for tooltip, using .get() to avoid KeyErrors for scenarios that don't have them
+                "RSI_Score": r.technicals.get('rsi_score'),
+                "Prox_Score": r.technicals.get('prox_score'),
             }
             results_list_of_dicts.append(res_dict)
 
