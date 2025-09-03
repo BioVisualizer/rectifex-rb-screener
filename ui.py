@@ -7,7 +7,7 @@ import shutil
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableView, QStatusBar, QFileDialog, QMessageBox, QHeaderView,
-    QProgressBar
+    QProgressBar, QComboBox
 )
 from PyQt6.QtCore import (
     QObject, QThread, pyqtSignal, QAbstractTableModel, Qt, QSortFilterProxyModel
@@ -22,10 +22,13 @@ from matplotlib.figure import Figure
 import mplfinance as mpf
 
 # App-specific imports
+import asyncio
 import config
 import data_loader
-import analysis
 from ticker_manager import TickerManagerDialog
+from data_structures import ReboundCandidate
+from fundamental_fetcher import FundamentalFetcher
+from rebound_scenarios import ScenarioRunner, calculate_sma, calculate_rsi
 
 # --- Worker Thread for Running Analysis ---
 
@@ -39,15 +42,28 @@ class WorkerSignals(QObject):
 
 class AnalysisWorker(QObject):
     """Worker thread for running the stock analysis to prevent GUI freezing."""
-    def __init__(self):
+    def __init__(self, selected_scenario: str):
         super().__init__()
         self.signals = WorkerSignals()
+        self.selected_scenario = selected_scenario
 
     def run(self):
         """Runs the analysis and emits signals for progress and completion."""
         try:
-            # The run_analysis function now accepts a progress callback
-            results = analysis.run_analysis(progress_callback=self.signals.progress, progress_percent_callback=self.signals.progress_percent)
+            fetcher = FundamentalFetcher()
+            runner = ScenarioRunner(
+                fundamental_fetcher=fetcher,
+                progress_callback=self.signals.progress,
+                progress_percent_callback=self.signals.progress_percent
+            )
+
+            results = []
+            if self.selected_scenario == "Classic Oversold":
+                results = runner.run_classic_oversold()
+            elif self.selected_scenario == "Quality Stock Pullback":
+                # Run the async function from this synchronous thread
+                results = asyncio.run(runner.run_quality_pullback())
+
             self.signals.result.emit(results)
         except Exception as e:
             import traceback
@@ -63,7 +79,10 @@ class PandasModel(QAbstractTableModel):
     def __init__(self, data=pd.DataFrame(), parent=None):
         super().__init__(parent)
         self._data = data
-        self.numeric_columns = ['Score', 'RSI', 'Price', 'Dist_SMA(%)', 'Dist_Low(%)']
+        self.numeric_columns = [
+            'Score', 'RSI', 'Price', 'Dist_SMA(%)', 'Dist_Low(%)',
+            'EPS-Wachstum', 'Umsatzwachstum'
+        ]
 
     def rowCount(self, parent=None):
         return self._data.shape[0]
@@ -106,49 +125,84 @@ class PandasModel(QAbstractTableModel):
 
 # --- Charting Window ---
 class ChartWindow(QWidget):
-    """A separate window for displaying a detailed stock chart for a given ticker."""
-    def __init__(self, ticker):
+    """A separate window for displaying a detailed stock chart for a given candidate."""
+    def __init__(self, candidate: ReboundCandidate):
         super().__init__()
-        self.ticker = ticker
-        self.setWindowTitle(f"Chart for {self.ticker} - {config.APP_NAME}")
+        self.candidate = candidate
+        self.setWindowTitle(f"Chart for {self.candidate.ticker} - {config.APP_NAME}")
         self.setGeometry(150, 150, 800, 600)
 
         layout = QVBoxLayout()
         self.setLayout(layout)
         self.canvas = FigureCanvas(Figure(figsize=(8, 6)))
         layout.addWidget(self.canvas)
+        self.ax = None # To hold the main axis
 
-        self.load_chart_data()
+        self.plot_stock_data(candidate)
 
-    def load_chart_data(self):
-        """Fetches stock data, calculates indicators, and plots the chart."""
-        data = data_loader.get_stock_data(self.ticker)
+    def plot_stock_data(self, candidate: ReboundCandidate):
+        """Fetches stock data, calculates indicators, and plots the chart for the candidate."""
+        data = data_loader.get_stock_data(candidate.ticker)
         if data is None or data.empty:
-            QMessageBox.warning(self, "Data Error", f"Could not load data for {self.ticker}.")
+            QMessageBox.warning(self, "Data Error", f"Could not load data for {candidate.ticker}.")
             return
 
         data = data.last(f'{config.CHART_HISTORY_MONTHS}M')
-        data['SMA200'] = analysis.calculate_sma(data['Close'], config.SMA_SUPPORT_PERIOD)
-        data['RSI'] = analysis.calculate_rsi(data['Close'], config.RSI_PERIOD)
+        # Calculate all required indicators
+        data['SMA50'] = calculate_sma(data['Close'], 50)
+        data['SMA200'] = calculate_sma(data['Close'], config.SMA_SUPPORT_PERIOD)
+        data['RSI'] = calculate_rsi(data['Close'], config.RSI_PERIOD)
 
-        ap0 = [mpf.make_addplot(data['SMA200'], color='blue', width=0.7)]
-
+        # --- Plotting ---
         fig = self.canvas.figure
         fig.clf()
-        ax1 = fig.add_subplot(3, 1, (1, 2))
-        ax2 = fig.add_subplot(3, 1, 3, sharex=ax1)
-        ax1.set_ylabel('Price')
+        # Create axes
+        gs = fig.add_gridspec(3, 1)
+        self.ax = fig.add_subplot(gs[0:2, 0]) # Main plot
+        ax2 = fig.add_subplot(gs[2, 0], sharex=self.ax) # RSI plot
+
+        self.ax.set_ylabel('Price')
         ax2.set_ylabel('RSI')
 
-        mpf.plot(data, type='candle', ax=ax1, volume=ax1.twinx(), addplot=ap0, style='yahoo',
-                 title=f'{self.ticker} - {config.CHART_HISTORY_MONTHS} Months')
+        # --- Dynamic Overlays ---
+        add_plots = []
+        if candidate.scenario == "Quality Stock Pullback":
+            support_level = candidate.technicals.get('50_sma_value')
+            if support_level:
+                self.ax.axhline(y=support_level, color='green', linestyle='--', label='50-Day SMA Support')
+            if not data['SMA50'].empty:
+                 add_plots.append(mpf.make_addplot(data['SMA50'], color='green', width=0.7))
 
+        # Always plot 200 SMA for context
+        if not data['SMA200'].empty:
+            add_plots.append(mpf.make_addplot(data['SMA200'], color='blue', width=0.7))
+
+        # Main candle plot
+        mpf.plot(data, type='candle', ax=self.ax, volume=self.ax.twinx(), addplot=add_plots, style='yahoo',
+                 title=f'{candidate.ticker} - {candidate.scenario}')
+
+        # RSI Plot
         ax2.plot(data.index, data['RSI'], color='orange')
         ax2.axhline(70, color='red', linestyle='--', linewidth=0.5)
         ax2.axhline(30, color='green', linestyle='--', linewidth=0.5)
         ax2.set_ylim(0, 100)
         ax2.grid(True)
 
+        # --- Information Box ---
+        eps_growth_str = f"{candidate.fundamentals.get('earningsGrowth', 0) * 100:.2f}%" if candidate.fundamentals.get('earningsGrowth') is not None else "N/A"
+        rev_growth_str = f"{candidate.fundamentals.get('revenueGrowth', 0) * 100:.2f}%" if candidate.fundamentals.get('revenueGrowth') is not None else "N/A"
+
+        info_text = (
+            f"Szenario: {candidate.scenario}\n"
+            f"Kurs: ${candidate.technicals.get('price', 0):.2f}\n"
+            f"RSI: {candidate.technicals.get('rsi', 0):.1f}\n"
+            f"EPS-Wachstum: {eps_growth_str}\n"
+            f"Umsatzwachstum: {rev_growth_str}"
+        )
+        self.ax.text(0.02, 0.98, info_text, transform=self.ax.transAxes, fontsize=9,
+                     verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5))
+
+        self.ax.legend()
         fig.tight_layout()
         self.canvas.draw()
 
@@ -175,6 +229,10 @@ class MainWindow(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
 
         controls_layout = QHBoxLayout()
+        self.scenarioComboBox = QComboBox()
+        self.scenarioComboBox.setObjectName("scenarioComboBox")
+        self.scenarioComboBox.addItems(["Classic Oversold", "Quality Stock Pullback"])
+
         self.scan_button = QPushButton("Start Scan")
         self.clear_cache_button = QPushButton("Clear Cache")
         self.manage_tickers_button = QPushButton("Manage Tickers")
@@ -185,6 +243,7 @@ class MainWindow(QMainWindow):
         self.export_csv_button.setEnabled(False)
         self.export_excel_button.setEnabled(False)
 
+        controls_layout.addWidget(self.scenarioComboBox)
         controls_layout.addWidget(self.scan_button)
         controls_layout.addWidget(self.clear_cache_button)
         controls_layout.addWidget(self.manage_tickers_button)
@@ -254,8 +313,10 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.show()
 
+        selected_scenario = self.scenarioComboBox.currentText()
+
         self.thread = QThread()
-        self.worker = AnalysisWorker()
+        self.worker = AnalysisWorker(selected_scenario=selected_scenario)
         self.worker.moveToThread(self.thread)
 
         self.thread.started.connect(self.worker.run)
@@ -287,7 +348,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(percent)
 
     def display_results(self, results):
-        """Receives the results from the worker and displays them in the table."""
+        """Receives the results (List[ReboundCandidate]) and displays them."""
         self.status_bar.showMessage(f"Scan complete. Found {len(results)} candidates.")
         self.scan_button.setEnabled(True)
         self.clear_cache_button.setEnabled(True)
@@ -297,53 +358,56 @@ class MainWindow(QMainWindow):
             self.results_df = pd.DataFrame()
             self.table_view.setModel(None)
             QMessageBox.information(self, "Scan Complete", "No potential candidates found.")
-        else:
-            # Create a DataFrame with only the columns to be displayed
-            display_cols = ["Ticker", "Name", "Market", "Score", "RSI", "Price", "Dist_SMA(%)", "Dist_Low(%)"]
-            self.results_df = pd.DataFrame(results)
-            display_df = self.results_df[display_cols]
+            return
 
-            model = PandasModel(display_df)
-            proxy_model = QSortFilterProxyModel()
-            proxy_model.setSourceModel(model)
-            self.table_view.setModel(proxy_model)
-            self.table_view.resizeColumnsToContents()
-            self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-            self.table_view.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-            self.table_view.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-
-            # Set Header Tooltips
-            header = self.table_view.horizontalHeader()
-            tooltip_map = {
-                "Score": "Rebound Score (0-100).\nGreen: > 80, Yellow: 60-79\n(Hover over a cell for breakdown)",
-                "Dist_SMA(%)": "Percentage distance from the 200-day Simple Moving Average.",
-                "Dist_Low(%)": "Percentage distance from the 90-day low."
+        # Convert list of ReboundCandidate objects to a list of dicts for the DataFrame
+        results_list_of_dicts = []
+        for r in results:
+            res_dict = {
+                "Ticker": r.ticker,
+                "Szenario": r.scenario,
+                "Score": r.score,
+                "Price": r.technicals.get('price', 'N/A'),
+                "EPS-Wachstum": f"{r.fundamentals.get('earningsGrowth', 0) * 100:.2f}%" if r.fundamentals.get('earningsGrowth') is not None else "N/A",
+                "Umsatzwachstum": f"{r.fundamentals.get('revenueGrowth', 0) * 100:.2f}%" if r.fundamentals.get('revenueGrowth') is not None else "N/A",
             }
-            for i, col_name in enumerate(display_df.columns):
-                if col_name in tooltip_map:
-                    header.setToolTip(f"{header.toolTip()}\n{col_name}: {tooltip_map[col_name]}")
+            results_list_of_dicts.append(res_dict)
+
+        self.results_df = pd.DataFrame(results_list_of_dicts)
+        self.all_candidates_data = results # Keep the original objects for charting
+
+        model = PandasModel(self.results_df)
+        proxy_model = QSortFilterProxyModel()
+        proxy_model.setSourceModel(model)
+        self.table_view.setModel(proxy_model)
+        self.table_view.resizeColumnsToContents()
+        self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        # Allow interactive resizing for specific columns
+        self.table_view.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive) # Ticker
+        self.table_view.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Szenario
 
 
-            # Automatically sort by the 'Score' column, descending
-            try:
-                score_col_index = display_df.columns.get_loc("Score")
-                self.table_view.sortByColumn(score_col_index, Qt.SortOrder.DescendingOrder)
-            except KeyError:
-                logging.warning("Could not find 'Score' column for auto-sorting.")
+        # Automatically sort by the 'Score' column, descending
+        try:
+            score_col_index = self.results_df.columns.get_loc("Score")
+            self.table_view.sortByColumn(score_col_index, Qt.SortOrder.DescendingOrder)
+        except KeyError:
+            pass # No score column
 
         has_results = not self.results_df.empty
         self.export_csv_button.setEnabled(has_results)
         self.export_excel_button.setEnabled(has_results)
+
 
     def open_chart_for_selection(self, index):
         """Opens a new chart window for the selected stock."""
         proxy_model = self.table_view.model()
         source_index = proxy_model.mapToSource(index)
 
-        ticker_col_index = self.results_df.columns.get_loc("Ticker")
-        ticker = self.results_df.iloc[source_index.row(), ticker_col_index]
+        # Get the corresponding ReboundCandidate object
+        candidate = self.all_candidates_data[source_index.row()]
 
-        chart_window = ChartWindow(ticker)
+        chart_window = ChartWindow(candidate)
         self.chart_windows.append(chart_window)
         chart_window.show()
 
