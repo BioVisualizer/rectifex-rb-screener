@@ -136,10 +136,13 @@ class ScenarioRunner:
 
         return is_candidate_A or is_candidate_B, rsi, dist_to_sma, dist_to_low
 
-    def _calculate_classic_score(self, rsi: float, dist_to_sma: float, dist_to_low: float) -> int:
-        """Calculates the score for the 'Classic Oversold' scenario."""
+    def _calculate_classic_score(self, rsi: float, dist_to_sma: float, dist_to_low: float) -> tuple[int, int, int]:
+        """
+        Calculates the rebound score and its components.
+        Returns the final score, the RSI sub-score, and the proximity sub-score.
+        """
         rsi_score = max(0, (config.RSI_SCORE_CEILING - rsi) * (100 / (config.RSI_SCORE_CEILING - config.RSI_OVERSOLD_STRONG)))
-        rsi_score = min(100, rsi_score)
+        rsi_score = int(min(100, rsi_score))
 
         prox_dist = np.inf
         if dist_to_sma >= 0: prox_dist = min(prox_dist, dist_to_sma)
@@ -149,9 +152,10 @@ class ScenarioRunner:
             proximity_score = 0
         else:
             proximity_score = (config.PROXIMITY_SCORE_CEILING - prox_dist) * (100 / config.PROXIMITY_SCORE_CEILING)
-        proximity_score = max(0, min(100, proximity_score))
+        proximity_score = int(max(0, min(100, proximity_score)))
 
-        return int((0.6 * rsi_score) + (0.4 * proximity_score))
+        final_score = int((0.6 * rsi_score) + (0.4 * proximity_score))
+        return final_score, rsi_score, proximity_score
 
     def run_classic_oversold(self) -> List[ReboundCandidate]:
         """
@@ -203,7 +207,7 @@ class ScenarioRunner:
                     continue
 
                 self._emit_progress(f"!!! {ticker} is a potential 'Classic Oversold' candidate!")
-                score = self._calculate_classic_score(rsi, dist_sma, dist_low)
+                score, rsi_score, prox_score = self._calculate_classic_score(rsi, dist_sma, dist_low)
 
                 candidate = ReboundCandidate(
                     ticker=ticker,
@@ -213,7 +217,9 @@ class ScenarioRunner:
                         'price': round(stock_data['Close'].iloc[-1], 2),
                         'rsi': round(rsi, 2),
                         'dist_sma_200': round(dist_sma, 2),
-                        'dist_low_90d': round(dist_low, 2)
+                        'dist_low_90d': round(dist_low, 2),
+                        'rsi_score': rsi_score,
+                        'prox_score': prox_score
                     },
                     fundamentals={'name': stock_info.get('shortName', 'N/A')}
                 )
