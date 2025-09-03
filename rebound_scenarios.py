@@ -291,7 +291,10 @@ class ScenarioRunner:
 
             # 3. Fundamental Filtering for this market
             self._emit_progress(f"Fetching fundamental data for {len(technically_strong_tickers)} strong tickers in {market}...")
-            fundamental_data = await self.fetcher.get_fundamentals_for_tickers(technically_strong_tickers)
+            fundamental_data = await self.fetcher.get_fundamentals_for_tickers(
+                technically_strong_tickers,
+                progress_callback=self._emit_progress
+            )
 
             fundamentally_strong_tickers = {}
             for ticker, data in fundamental_data.items():
