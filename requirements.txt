@@ -5,3 +5,4 @@ lxml
 openpyxl
 matplotlib
 mplfinance
+aiohttp
