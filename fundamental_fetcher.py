@@ -95,14 +95,17 @@ class FundamentalFetcher:
         if not tickers_to_fetch:
             return results
 
-        # Create async tasks for tickers that need fetching
-        tasks = {asyncio.create_task(self._fetch_single_ticker_data(t)): t for t in tickers_to_fetch}
+        # Create a list of named tasks for tickers that need fetching
+        tasks = [
+            asyncio.create_task(self._fetch_single_ticker_data(t), name=t)
+            for t in tickers_to_fetch
+        ]
 
         fetched_count = 0
         total_to_fetch = len(tickers_to_fetch)
 
         for task in asyncio.as_completed(tasks):
-            ticker = tasks[task]
+            ticker = task.get_name()
             try:
                 data = await task
                 if data:
