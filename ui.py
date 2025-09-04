@@ -80,8 +80,7 @@ class PandasModel(QAbstractTableModel):
         super().__init__(parent)
         self._data = data
         self.numeric_columns = [
-            'Score', 'RSI', 'Price', 'Dist_SMA(%)', 'Dist_Low(%)',
-            'EPS-Wachstum', 'Umsatzwachstum'
+            'Score', 'RSI', 'Price', 'Dist_SMA(%)', 'Dist_Low(%)'
         ]
 
     def rowCount(self, parent=None):
@@ -367,16 +366,12 @@ class MainWindow(QMainWindow):
         # Convert list of ReboundCandidate objects to a list of dicts for the DataFrame
         results_list_of_dicts = []
         for r in results:
-            eps_growth = r.fundamentals.get('earningsGrowth')
-            rev_growth = r.fundamentals.get('revenueGrowth')
-
             res_dict = {
                 "Ticker": r.ticker,
+                "Name": r.fundamentals.get('name', 'N/A'),
                 "Szenario": r.scenario,
                 "Score": r.score,
                 "Price": r.technicals.get('price', '-'),
-                "EPS-Wachstum": f"{eps_growth * 100:.2f}%" if eps_growth is not None else "-",
-                "Umsatzwachstum": f"{rev_growth * 100:.2f}%" if rev_growth is not None else "-",
                 # Add sub-scores for tooltip, using .get() to avoid KeyErrors for scenarios that don't have them
                 "RSI_Score": r.technicals.get('rsi_score'),
                 "Prox_Score": r.technicals.get('prox_score'),

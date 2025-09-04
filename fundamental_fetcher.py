@@ -77,6 +77,7 @@ class FundamentalFetcher:
             return None
 
     async def get_fundamentals_for_tickers(self, tickers: List[str], progress_callback: Any = None) -> Dict[str, Dict]:
+        logging.info("--- RUNNING V2 WRAPPER-BASED FETCHER ---")
         """
         Asynchronously retrieves fundamental data for a list of tickers,
         providing progress updates along the way.

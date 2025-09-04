@@ -265,13 +265,17 @@ class ScenarioRunner:
 
             # 2. Technical Pre-filtering for this market
             technically_strong_tickers = []
+            ticker_info_cache = {} # Cache for stock info objects
             for ticker in tickers:
                 processed_tickers += 1
                 self._emit_percent(int((processed_tickers / total_tickers) * 50)) # Phase 1 up to 50%
                 self._emit_progress(f"[{processed_tickers}/{total_tickers}] Tech Filter: {ticker}")
 
-                if not passes_liquidity_filter(get_ticker_info_cached(ticker)):
+                stock_info = get_ticker_info_cached(ticker)
+                if not passes_liquidity_filter(stock_info):
                     continue
+
+                ticker_info_cache[ticker] = stock_info # Store for later use
 
                 stock_data = data_loader.get_stock_data(ticker)
                 if stock_data is None or len(stock_data) < 200:
@@ -341,6 +345,10 @@ class ScenarioRunner:
                         prox_score = 100 - (dist_to_sma50 / 3.0 * 100)
                         fund_score = (fund_data.get('earningsGrowth', 0) * 100)
                         score = int(0.7 * prox_score + 0.3 * fund_score)
+
+                        # Add company name to fundamentals
+                        stock_info = ticker_info_cache.get(ticker, {})
+                        fund_data['name'] = stock_info.get('shortName', 'N/A')
 
                         candidate = ReboundCandidate(
                             ticker=ticker, scenario="Quality Stock Pullback", score=min(100, score),
