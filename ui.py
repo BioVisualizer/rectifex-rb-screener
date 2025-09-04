@@ -108,13 +108,17 @@ class PandasModel(QAbstractTableModel):
                     return QColor("#fff3cd")
 
             if role == Qt.ItemDataRole.ToolTipRole and column_name == "Score":
+                base_tooltip = "Gesamt-Score (0-100), der das Rebound-Potenzial bewertet. Höher ist besser."
+
                 # Check if the score breakdown columns exist for this row
                 if 'RSI_Score' in self._data.columns and 'Prox_Score' in self._data.columns:
                     rsi_score = self._data.iloc[index.row()]["RSI_Score"]
                     prox_score = self._data.iloc[index.row()]["Prox_Score"]
                     # Also check if they are not NaN or some other placeholder
                     if pd.notna(rsi_score) and pd.notna(prox_score):
-                        return f"Score Breakdown:\n- RSI Score: {rsi_score} / 60\n- Proximity Score: {prox_score} / 40"
+                        breakdown_tooltip = f"\n\nDetail-Score ('Classic Oversold'):\n- RSI Score: {int(rsi_score)} / 60\n- Proximity Score: {int(prox_score)} / 40"
+                        return base_tooltip + breakdown_tooltip
+                return base_tooltip
         return None
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
@@ -277,23 +281,10 @@ class MainWindow(QMainWindow):
         self.export_csv_button.clicked.connect(self.export_to_csv)
         self.export_excel_button.clicked.connect(self.export_to_excel)
 
-        self.setup_header_tooltips()
-
     def open_ticker_manager(self):
         """Opens the Ticker Manager dialog."""
         dialog = TickerManagerDialog(self)
         dialog.exec()
-
-    def setup_header_tooltips(self):
-        """Sets tooltips for the table headers."""
-        header = self.table_view.horizontalHeader()
-        tooltip_map = {
-            "Score": "Rebound-Score (0-100).\nGrün: > 80, Gelb: 60-79\nTooltip auf Zelle für Details.",
-            "Dist_SMA(%)": "Prozentualer Abstand zum 200-Tage-Durchschnitt (SMA).",
-            "Dist_Low(%)": "Prozentualer Abstand zum 90-Tage-Tief."
-        }
-        # We need to set the model first for this to work, so we'll do it after a scan.
-        # This is just a placeholder for the logic. The actual setting happens in display_results.
 
     def show_about_dialog(self):
         """Shows the 'About' dialog with application info and credits."""
@@ -302,6 +293,21 @@ class MainWindow(QMainWindow):
         <p>Version 1.0</p>
         <p>This application scans global stock markets to identify potential long-rebound candidates based on technical analysis criteria.</p>
         <p>This application was developed by Lukas Morcinek.</p>
+        <hr>
+        <p><b>Scanning-Szenarien & Score</b></p>
+        <p>Die Anwendung verwendet verschiedene Szenarien, um potenzielle Kandidaten zu finden:</p>
+        <ul>
+            <li><b>Classic Oversold:</b> Dieses Szenario sucht nach technisch überverkauften Aktien, die sich in der Nähe starker Unterstützungsniveaus befinden (wie dem 200-Tage-Durchschnitt oder dem 90-Tage-Tief). Der Score (0-100) basiert hauptsächlich auf dem RSI (Relative Strength Index) und der Nähe zu diesen Unterstützungen.</li>
+            <li><b>Quality Stock Pullback:</b> Dieses Szenario sucht nach fundamental gesunden Unternehmen, die sich in einem langfristigen Aufwärtstrend befinden und kürzlich einen kleinen Kursrücksetzer (Pullback) in Richtung ihres 50-Tage-Durchschnitts erlebt haben. Der Score bewertet die Stärke des fundamentalen Profils und die Nähe zum 50-Tage-Durchschnitt.</li>
+        </ul>
+        <p><b>Spalten-Erklärungen:</b></p>
+        <ul>
+            <li><b>Ticker:</b> Das Börsenkürzel des Unternehmens.</li>
+            <li><b>Name:</b> Der Name des Unternehmens.</li>
+            <li><b>Szenario:</b> Das erkannte Szenario, das die Aktie qualifiziert hat.</li>
+            <li><b>Score:</b> Ein gewichteter Score (0-100), der das Rebound-Potenzial bewertet. Höher ist besser. Fahren Sie mit der Maus über eine Zelle für Details.</li>
+            <li><b>Price:</b> Der letzte Schlusskurs der Aktie.</li>
+        </ul>
         <hr>
         <p><b>Disclaimer:</b></p>
         <p>This tool is for informational purposes only and does not constitute financial advice. The results are based on historical data and technical indicators, which do not guarantee future performance. Always conduct your own thorough research before making any investment decisions.</p>
