@@ -18,6 +18,23 @@ The application is built with Python and PyQt6, and it is designed to be package
     *   Pop-up chart window for visual analysis of any candidate.
     *   Export results to CSV or Excel (XLSX).
 
+## Scanning Scenarios
+
+The application uses two main scenarios to find potential rebound candidates.
+
+### Classic Oversold
+This scenario looks for technically oversold stocks that are near strong, long-term support levels. The criteria are:
+- **RSI (Relative Strength Index):** The stock's 14-day RSI must be below a certain threshold, indicating it may be oversold.
+- **Support Proximity:** The stock's current price must be close to a key support level, such as its 200-day simple moving average (SMA) or its 90-day low.
+- **Score:** The Rebound Score (0-100) for this scenario is weighted. About 60% of the score is based on how deeply oversold the RSI is, and about 40% is based on how close the price is to the support levels.
+
+### Quality Stock Pullback
+This scenario looks for fundamentally strong companies that are in a healthy, long-term uptrend and have experienced a recent, minor price dip (a "pullback"). This is often seen as a potential buying opportunity.
+- **Uptrend:** The stock must be trading above its 200-day SMA, and its 50-day SMA must also be above the 200-day SMA, confirming a strong trend.
+- **Fundamental Strength:** The company must meet at least two of the following criteria: positive earnings growth, positive revenue growth, and a low debt-to-equity ratio.
+- **Pullback:** The stock's price must have recently pulled back to within a few percent of its 50-day SMA.
+- **Score:** The score for this scenario is weighted based on the quality of the fundamentals and the proximity of the price to the 50-day SMA support level.
+
 ## Installation and Usage (from Source)
 
 These instructions explain how to build and install the application on a Debian-based system like Kubuntu using the provided Flatpak manifest.
