@@ -77,6 +77,7 @@ class FundamentalFetcher:
             return None
 
     async def get_fundamentals_for_tickers(self, tickers: List[str], progress_callback: Any = None) -> Dict[str, Dict]:
+        logging.info("--- RUNNING V2 WRAPPER-BASED FETCHER ---")
         """
         Asynchronously retrieves fundamental data for a list of tickers,
         providing progress updates along the way.
@@ -95,27 +96,32 @@ class FundamentalFetcher:
         if not tickers_to_fetch:
             return results
 
-        # Create a list of named tasks for tickers that need fetching
-        tasks = [
-            asyncio.create_task(self._fetch_single_ticker_data(t), name=t)
-            for t in tickers_to_fetch
-        ]
+        # Wrapper to ensure we always have the ticker context, even on error
+        async def fetch_with_context(ticker: str):
+            try:
+                data = await self._fetch_single_ticker_data(ticker)
+                return ticker, data, None
+            except Exception as e:
+                return ticker, None, e
+
+        # Create tasks using the wrapper
+        tasks = [fetch_with_context(t) for t in tickers_to_fetch]
 
         fetched_count = 0
         total_to_fetch = len(tickers_to_fetch)
 
-        for task in asyncio.as_completed(tasks):
-            ticker = task.get_name()
-            try:
-                data = await task
-                if data:
-                    results[ticker] = data
-                    self._save_to_cache(ticker, data)
-            except Exception as e:
-                logging.error(f"Error fetching fundamental data for {ticker}: {e}")
+        for future in asyncio.as_completed(tasks):
+            ticker, data, error = await future
+
+            if error:
+                logging.error(f"Error fetching fundamental data for {ticker}: {error}")
+            elif data:
+                results[ticker] = data
+                self._save_to_cache(ticker, data)
 
             fetched_count += 1
             if progress_callback:
+                # Provide a generic progress update or one with the ticker
                 progress_callback(f"Fetched fundamentals for {ticker} ({fetched_count}/{total_to_fetch})")
 
         return results
