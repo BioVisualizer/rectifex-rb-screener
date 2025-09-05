@@ -2,6 +2,7 @@
 # Contains all PyQt6 classes for the user interface.
 
 import sys
+import logging
 import pandas as pd
 import shutil
 from PyQt6.QtWidgets import (
