@@ -247,6 +247,7 @@ class ScenarioRunner:
 
         index_data_cache = {}
         market_context_ok = {}
+        ticker_info_cache = {} # Cache for stock info objects
 
         for market, tickers in all_tickers_by_market.items():
             if self.is_cancelled():
@@ -273,7 +274,6 @@ class ScenarioRunner:
 
             # 2. Technical Pre-filtering for this market
             technically_strong_tickers = []
-            ticker_info_cache = {} # Cache for stock info objects
             for ticker in tickers:
                 if self.is_cancelled():
                     self._emit_progress("Scan cancelled by user.")
