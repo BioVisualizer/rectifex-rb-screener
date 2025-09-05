@@ -2,7 +2,7 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Callable
 import logging
 
 import yfinance as yf
