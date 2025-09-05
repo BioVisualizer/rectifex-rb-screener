@@ -14,29 +14,13 @@ import config
 import data_loader
 from data_structures import ReboundCandidate
 from fundamental_fetcher import FundamentalFetcher
+from quality_scorer import calculate_adaptive_score, calculate_sma, calculate_rsi
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 # --- Helper Functions (moved from analysis.py) ---
-
-def calculate_sma(data: pd.Series, window: int) -> pd.Series:
-    """Calculates the Simple Moving Average."""
-    if data is None or len(data) < window:
-        return pd.Series(dtype=np.float64)
-    return data.rolling(window=window).mean()
-
-def calculate_rsi(data: pd.Series, window: int = 14) -> pd.Series:
-    """Calculates the Relative Strength Index (RSI)."""
-    if data is None or len(data) < window:
-        return pd.Series(dtype=np.float64)
-    delta = data.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
 
 def passes_market_context_filter(index_data: pd.DataFrame) -> bool:
     """Checks if the market index is in a positive trend (above its 50-day SMA)."""
@@ -137,27 +121,6 @@ class ScenarioRunner:
 
         return is_candidate_A or is_candidate_B, rsi, dist_to_sma, dist_to_low
 
-    def _calculate_classic_score(self, rsi: float, dist_to_sma: float, dist_to_low: float) -> tuple[int, int, int]:
-        """
-        Calculates the rebound score and its components.
-        Returns the final score, the RSI sub-score, and the proximity sub-score.
-        """
-        rsi_score = max(0, (config.RSI_SCORE_CEILING - rsi) * (100 / (config.RSI_SCORE_CEILING - config.RSI_OVERSOLD_STRONG)))
-        rsi_score = int(min(100, rsi_score))
-
-        prox_dist = np.inf
-        if dist_to_sma >= 0: prox_dist = min(prox_dist, dist_to_sma)
-        if dist_to_low >= 0: prox_dist = min(prox_dist, dist_to_low)
-
-        if prox_dist > config.PROXIMITY_SCORE_CEILING:
-            proximity_score = 0
-        else:
-            proximity_score = (config.PROXIMITY_SCORE_CEILING - prox_dist) * (100 / config.PROXIMITY_SCORE_CEILING)
-        proximity_score = int(max(0, min(100, proximity_score)))
-
-        final_score = int((0.6 * rsi_score) + (0.4 * proximity_score))
-        return final_score, rsi_score, proximity_score
-
     def run_classic_oversold(self) -> List[ReboundCandidate]:
         """
         Implements the existing logic: Oversold RSI, near 200-SMA and 90-day-low.
@@ -213,19 +176,20 @@ class ScenarioRunner:
                     continue
 
                 self._emit_progress(f"!!! {ticker} is a potential 'Classic Oversold' candidate!")
-                score, rsi_score, prox_score = self._calculate_classic_score(rsi, dist_sma, dist_low)
+
+                # Calculate the new adaptive score
+                score, tooltip = calculate_adaptive_score(stock_info, stock_data)
 
                 candidate = ReboundCandidate(
                     ticker=ticker,
                     scenario="Classic Oversold",
                     score=score,
+                    tooltip_text=tooltip,
                     technicals={
                         'price': round(stock_data['Close'].iloc[-1], 2),
                         'rsi': round(rsi, 2),
                         'dist_sma_200': round(dist_sma, 2),
-                        'dist_low_90d': round(dist_low, 2),
-                        'rsi_score': rsi_score,
-                        'prox_score': prox_score
+                        'dist_low_90d': round(dist_low, 2)
                     },
                     fundamentals={'name': stock_info.get('shortName', 'N/A')}
                 )
@@ -361,22 +325,28 @@ class ScenarioRunner:
                     dist_to_sma50 = abs((current_price - sma50) / sma50) * 100
                     if dist_to_sma50 <= 3.0:
                         self._emit_progress(f"!!! {ticker} is a potential 'Quality Pullback' candidate!")
-                        prox_score = 100 - (dist_to_sma50 / 3.0 * 100)
-                        fund_score = (fund_data.get('earningsGrowth', 0) * 100)
-                        score = int(0.7 * prox_score + 0.3 * fund_score)
 
-                        # Add company name to fundamentals
+                        # Add company name to fundamentals from the pre-fetched info
                         stock_info = ticker_info_cache.get(ticker, {})
-                        fund_data['name'] = stock_info.get('shortName', 'N/A')
+                        # The fundamental_data from the bulk fetch might be more complete, so merge them
+                        # giving preference to the more detailed `fund_data`
+                        combined_info = {**stock_info, **fund_data}
+                        combined_info['name'] = stock_info.get('shortName', 'N/A')
+
+                        # Calculate the new adaptive score
+                        score, tooltip = calculate_adaptive_score(combined_info, stock_data)
 
                         candidate = ReboundCandidate(
-                            ticker=ticker, scenario="Quality Stock Pullback", score=min(100, score),
+                            ticker=ticker,
+                            scenario="Quality Stock Pullback",
+                            score=score,
+                            tooltip_text=tooltip,
                             technicals={
                                 'price': round(current_price, 2),
                                 '50_sma_value': round(sma50, 2),
                                 'dist_sma_50': round(dist_to_sma50, 2)
                             },
-                            fundamentals=fund_data
+                            fundamentals=combined_info
                         )
                         all_candidates.append(candidate)
 

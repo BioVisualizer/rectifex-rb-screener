@@ -6,6 +6,7 @@ class ReboundCandidate:
     ticker: str
     scenario: str  # e.g. "Classic Oversold", "Quality Stock Pullback"
     score: int
+    tooltip_text: str = ""
     technicals: Dict[str, Any] = field(default_factory=dict)
     fundamentals: Dict[str, Any] = field(default_factory=dict)
     # Example for technicals: {'price': 150.5, 'rsi': 45, 'support_level': 148.0}
