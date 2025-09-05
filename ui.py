@@ -46,6 +46,12 @@ class AnalysisWorker(QObject):
         super().__init__()
         self.signals = WorkerSignals()
         self.selected_scenario = selected_scenario
+        self._is_cancelled = False
+
+    def cancel(self):
+        """Sets the cancellation flag to True."""
+        logging.info("Cancellation requested for worker.")
+        self._is_cancelled = True
 
     def run(self):
         """Runs the analysis and emits signals for progress and completion."""
@@ -54,7 +60,8 @@ class AnalysisWorker(QObject):
             runner = ScenarioRunner(
                 fundamental_fetcher=fetcher,
                 progress_callback=self.signals.progress,
-                progress_percent_callback=self.signals.progress_percent
+                progress_percent_callback=self.signals.progress_percent,
+                is_cancelled_callback=lambda: self._is_cancelled
             )
 
             results = []
@@ -108,7 +115,7 @@ class PandasModel(QAbstractTableModel):
                     return QColor("#fff3cd")
 
             if role == Qt.ItemDataRole.ToolTipRole and column_name == "Score":
-                base_tooltip = "Gesamt-Score (0-100), der das Rebound-Potenzial bewertet. Höher ist besser."
+                base_tooltip = "Overall score (0-100) that rates the rebound potential. Higher is better."
 
                 # Check if the score breakdown columns exist for this row
                 if 'RSI_Score' in self._data.columns and 'Prox_Score' in self._data.columns:
@@ -116,7 +123,7 @@ class PandasModel(QAbstractTableModel):
                     prox_score = self._data.iloc[index.row()]["Prox_Score"]
                     # Also check if they are not NaN or some other placeholder
                     if pd.notna(rsi_score) and pd.notna(prox_score):
-                        breakdown_tooltip = f"\n\nDetail-Score ('Classic Oversold'):\n- RSI Score: {int(rsi_score)} / 60\n- Proximity Score: {int(prox_score)} / 40"
+                        breakdown_tooltip = f"\n\nBreakdown ('Classic Oversold'):\n- RSI Score: {int(rsi_score)} / 60\n- Proximity Score: {int(prox_score)} / 40"
                         return base_tooltip + breakdown_tooltip
                 return base_tooltip
         return None
@@ -200,11 +207,11 @@ class ChartWindow(QWidget):
         rev_growth_str = f"{candidate.fundamentals.get('revenueGrowth', 0) * 100:.2f}%" if candidate.fundamentals.get('revenueGrowth') is not None else "N/A"
 
         info_text = (
-            f"Szenario: {candidate.scenario}\n"
-            f"Kurs: ${candidate.technicals.get('price', 0):.2f}\n"
+            f"Scenario: {candidate.scenario}\n"
+            f"Price: ${candidate.technicals.get('price', 0):.2f}\n"
             f"RSI: {candidate.technicals.get('rsi', 0):.1f}\n"
-            f"EPS-Wachstum: {eps_growth_str}\n"
-            f"Umsatzwachstum: {rev_growth_str}"
+            f"EPS Growth: {eps_growth_str}\n"
+            f"Revenue Growth: {rev_growth_str}"
         )
         self.ax.text(0.02, 0.98, info_text, transform=self.ax.transAxes, fontsize=9,
                      verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5))
@@ -241,6 +248,7 @@ class MainWindow(QMainWindow):
         self.scenarioComboBox.addItems(["Classic Oversold", "Quality Stock Pullback"])
 
         self.scan_button = QPushButton("Start Scan")
+        self.stop_scan_button = QPushButton("Stop Scan")
         self.clear_cache_button = QPushButton("Clear Cache")
         self.manage_tickers_button = QPushButton("Manage Tickers")
         self.help_button = QPushButton("Help")
@@ -249,9 +257,13 @@ class MainWindow(QMainWindow):
 
         self.export_csv_button.setEnabled(False)
         self.export_excel_button.setEnabled(False)
+        self.stop_scan_button.hide()
+        self.stop_scan_button.setEnabled(False)
+
 
         controls_layout.addWidget(self.scenarioComboBox)
         controls_layout.addWidget(self.scan_button)
+        controls_layout.addWidget(self.stop_scan_button)
         controls_layout.addWidget(self.clear_cache_button)
         controls_layout.addWidget(self.manage_tickers_button)
         controls_layout.addStretch()
@@ -274,12 +286,20 @@ class MainWindow(QMainWindow):
 
         # --- Connections ---
         self.scan_button.clicked.connect(self.start_scan)
+        self.stop_scan_button.clicked.connect(self.stop_scan)
         self.clear_cache_button.clicked.connect(self.clear_cache)
         self.manage_tickers_button.clicked.connect(self.open_ticker_manager)
         self.help_button.clicked.connect(self.show_about_dialog)
         self.table_view.doubleClicked.connect(self.open_chart_for_selection)
         self.export_csv_button.clicked.connect(self.export_to_csv)
         self.export_excel_button.clicked.connect(self.export_to_excel)
+
+    def stop_scan(self):
+        """Requests the worker thread to stop."""
+        if hasattr(self, 'worker') and self.worker:
+            self.status_bar.showMessage("Stopping scan...")
+            self.stop_scan_button.setEnabled(False) # Prevent multiple clicks
+            self.worker.cancel()
 
     def open_ticker_manager(self):
         """Opens the Ticker Manager dialog."""
@@ -294,19 +314,19 @@ class MainWindow(QMainWindow):
         <p>This application scans global stock markets to identify potential long-rebound candidates based on technical analysis criteria.</p>
         <p>This application was developed by Lukas Morcinek.</p>
         <hr>
-        <p><b>Scanning-Szenarien & Score</b></p>
-        <p>Die Anwendung verwendet verschiedene Szenarien, um potenzielle Kandidaten zu finden:</p>
+        <p><b>Scanning Scenarios & Score</b></p>
+        <p>The application uses different scenarios to find potential candidates:</p>
         <ul>
-            <li><b>Classic Oversold:</b> Dieses Szenario sucht nach technisch überverkauften Aktien, die sich in der Nähe starker Unterstützungsniveaus befinden (wie dem 200-Tage-Durchschnitt oder dem 90-Tage-Tief). Der Score (0-100) basiert hauptsächlich auf dem RSI (Relative Strength Index) und der Nähe zu diesen Unterstützungen.</li>
-            <li><b>Quality Stock Pullback:</b> Dieses Szenario sucht nach fundamental gesunden Unternehmen, die sich in einem langfristigen Aufwärtstrend befinden und kürzlich einen kleinen Kursrücksetzer (Pullback) in Richtung ihres 50-Tage-Durchschnitts erlebt haben. Der Score bewertet die Stärke des fundamentalen Profils und die Nähe zum 50-Tage-Durchschnitt.</li>
+            <li><b>Classic Oversold:</b> This scenario looks for technically oversold stocks that are near strong support levels (like the 200-day average or the 90-day low). The score (0-100) is primarily based on the RSI (Relative Strength Index) and proximity to these supports.</li>
+            <li><b>Quality Stock Pullback:</b> This scenario looks for fundamentally sound companies in a long-term uptrend that have recently experienced a small pullback towards their 50-day average. The score assesses the strength of the fundamental profile and the proximity to the 50-day average.</li>
         </ul>
-        <p><b>Spalten-Erklärungen:</b></p>
+        <p><b>Column Explanations:</b></p>
         <ul>
-            <li><b>Ticker:</b> Das Börsenkürzel des Unternehmens.</li>
-            <li><b>Name:</b> Der Name des Unternehmens.</li>
-            <li><b>Szenario:</b> Das erkannte Szenario, das die Aktie qualifiziert hat.</li>
-            <li><b>Score:</b> Ein gewichteter Score (0-100), der das Rebound-Potenzial bewertet. Höher ist besser. Fahren Sie mit der Maus über eine Zelle für Details.</li>
-            <li><b>Price:</b> Der letzte Schlusskurs der Aktie.</li>
+            <li><b>Ticker:</b> The stock ticker symbol of the company.</li>
+            <li><b>Name:</b> The name of the company.</li>
+            <li><b>Scenario:</b> The screening scenario that qualified the stock.</li>
+            <li><b>Score:</b> A weighted score (0-100) that rates the rebound potential. Higher is better. Hover over a cell for details.</li>
+            <li><b>Price:</b> The last closing price of the stock.</li>
         </ul>
         <hr>
         <p><b>Disclaimer:</b></p>
@@ -317,6 +337,8 @@ class MainWindow(QMainWindow):
     def start_scan(self):
         """Sets up and starts the analysis worker thread."""
         self.scan_button.setEnabled(False)
+        self.stop_scan_button.show()
+        self.stop_scan_button.setEnabled(True)
         self.clear_cache_button.setEnabled(False)
         self.status_bar.showMessage("Starting scan...")
         self.progress_bar.setValue(0)
@@ -344,6 +366,8 @@ class MainWindow(QMainWindow):
         exctype, value, tb = error_info
         self.status_bar.showMessage(f"Scan Error: {value}")
         self.scan_button.setEnabled(True)
+        self.stop_scan_button.hide()
+        self.stop_scan_button.setEnabled(False)
         self.clear_cache_button.setEnabled(True)
         self.progress_bar.hide()
         QMessageBox.critical(self, "Scan Error", f"An unexpected error occurred:\n\n{value}\n\nTraceback:\n{tb}")
@@ -358,8 +382,15 @@ class MainWindow(QMainWindow):
 
     def display_results(self, results):
         """Receives the results (List[ReboundCandidate]) and displays them."""
-        self.status_bar.showMessage(f"Scan complete. Found {len(results)} candidates.")
+        # Check if the scan was cancelled, otherwise show the count
+        if self.worker and self.worker._is_cancelled:
+             self.status_bar.showMessage(f"Scan stopped by user. {len(results)} candidates found before stopping.")
+        else:
+            self.status_bar.showMessage(f"Scan complete. Found {len(results)} candidates.")
+
         self.scan_button.setEnabled(True)
+        self.stop_scan_button.hide()
+        self.stop_scan_button.setEnabled(False)
         self.clear_cache_button.setEnabled(True)
         self.progress_bar.hide()
 
@@ -375,7 +406,7 @@ class MainWindow(QMainWindow):
             res_dict = {
                 "Ticker": r.ticker,
                 "Name": r.fundamentals.get('name', 'N/A'),
-                "Szenario": r.scenario,
+                "Scenario": r.scenario,
                 "Score": r.score,
                 "Price": r.technicals.get('price', '-'),
                 # Add sub-scores for tooltip, using .get() to avoid KeyErrors for scenarios that don't have them

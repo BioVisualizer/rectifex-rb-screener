@@ -76,12 +76,12 @@ class FundamentalFetcher:
             logging.warning(f"Could not download fundamental info for {ticker}: {e}")
             return None
 
-    async def get_fundamentals_for_tickers(self, tickers: List[str], progress_callback: Any = None) -> Dict[str, Dict]:
-        logging.info("--- RUNNING V2 WRAPPER-BASED FETCHER ---")
+    async def get_fundamentals_for_tickers(self, tickers: List[str], progress_callback: Any = None, is_cancelled_callback: Callable = None) -> Dict[str, Dict]:
         """
         Asynchronously retrieves fundamental data for a list of tickers,
         providing progress updates along the way.
         """
+        is_cancelled = is_cancelled_callback if is_cancelled_callback else lambda: False
         results = {}
         tickers_to_fetch = []
 
@@ -111,18 +111,26 @@ class FundamentalFetcher:
         total_to_fetch = len(tickers_to_fetch)
 
         for future in asyncio.as_completed(tasks):
-            ticker, data, error = await future
+            if is_cancelled():
+                logging.info("Async fetch cancelled by user. Remaining tasks will be abandoned.")
+                break
 
-            if error:
-                logging.error(f"Error fetching fundamental data for {ticker}: {error}")
-            elif data:
-                results[ticker] = data
-                self._save_to_cache(ticker, data)
+            try:
+                ticker, data, error = await future
 
-            fetched_count += 1
-            if progress_callback:
-                # Provide a generic progress update or one with the ticker
-                progress_callback(f"Fetched fundamentals for {ticker} ({fetched_count}/{total_to_fetch})")
+                if error:
+                    logging.error(f"Error fetching fundamental data for {ticker}: {error}")
+                elif data:
+                    results[ticker] = data
+                    self._save_to_cache(ticker, data)
+
+                fetched_count += 1
+                if progress_callback:
+                    # Provide a generic progress update or one with the ticker
+                    progress_callback(f"Fetched fundamentals for {ticker} ({fetched_count}/{total_to_fetch})")
+            except asyncio.CancelledError:
+                logging.info("A fetch task was cancelled.")
+
 
         return results
 
