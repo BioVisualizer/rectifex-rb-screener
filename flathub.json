@@ -28,6 +28,7 @@
                 "install -D data_structures.py /app/data_structures.py",
                 "install -D fundamental_fetcher.py /app/fundamental_fetcher.py",
                 "install -D rebound_scenarios.py /app/rebound_scenarios.py",
+                "install -D quality_scorer.py /app/quality_scorer.py",
                 "install -D data_loader.py /app/data_loader.py",
                 "install -D ticker_manager.py /app/ticker_manager.py",
                 "install -D config.py /app/config.py",
