@@ -95,10 +95,11 @@ class ScenarioRunner:
     """
     Orchestrates the filtering process for different rebound scenarios.
     """
-    def __init__(self, fundamental_fetcher: FundamentalFetcher, progress_callback: Callable = None, progress_percent_callback: Callable = None):
+    def __init__(self, fundamental_fetcher: FundamentalFetcher, progress_callback: Callable = None, progress_percent_callback: Callable = None, is_cancelled_callback: Callable = None):
         self.fetcher = fundamental_fetcher
         self.progress_callback = progress_callback
         self.progress_percent_callback = progress_percent_callback
+        self.is_cancelled = is_cancelled_callback if is_cancelled_callback else lambda: False
 
     def _emit_progress(self, message: str):
         logging.info(message)
@@ -172,6 +173,8 @@ class ScenarioRunner:
         market_context_ok = {}
 
         for market, tickers in all_tickers.items():
+            if self.is_cancelled():
+                break
             self._emit_progress(f"--- Processing Market: {market} ---")
             index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
             if not index_ticker:
@@ -190,6 +193,9 @@ class ScenarioRunner:
 
             self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
             for ticker in tickers:
+                if self.is_cancelled():
+                    self._emit_progress("Scan cancelled by user.")
+                    break
                 processed_tickers += 1
                 self._emit_percent(int((processed_tickers / total_tickers) * 100))
                 self._emit_progress(f"Analyzing [{processed_tickers}/{total_tickers}] {ticker}")
@@ -243,6 +249,8 @@ class ScenarioRunner:
         market_context_ok = {}
 
         for market, tickers in all_tickers_by_market.items():
+            if self.is_cancelled():
+                break
             self._emit_progress(f"--- Processing Market: {market} ---")
 
             # 1. Market Context Filter
@@ -267,6 +275,9 @@ class ScenarioRunner:
             technically_strong_tickers = []
             ticker_info_cache = {} # Cache for stock info objects
             for ticker in tickers:
+                if self.is_cancelled():
+                    self._emit_progress("Scan cancelled by user.")
+                    break
                 processed_tickers += 1
                 self._emit_percent(int((processed_tickers / total_tickers) * 50)) # Phase 1 up to 50%
                 self._emit_progress(f"[{processed_tickers}/{total_tickers}] Tech Filter: {ticker}")
@@ -295,9 +306,14 @@ class ScenarioRunner:
 
             # 3. Fundamental Filtering for this market
             self._emit_progress(f"Fetching fundamental data for {len(technically_strong_tickers)} strong tickers in {market}...")
+            if self.is_cancelled():
+                self._emit_progress("Scan cancelled before fetching fundamentals.")
+                return all_candidates
+
             fundamental_data = await self.fetcher.get_fundamentals_for_tickers(
                 technically_strong_tickers,
-                progress_callback=self._emit_progress
+                progress_callback=self._emit_progress,
+                is_cancelled_callback=self.is_cancelled
             )
 
             fundamentally_strong_tickers = {}
@@ -327,6 +343,9 @@ class ScenarioRunner:
             # 4. Final Signal Filter (Pullback) for this market
             self._emit_progress(f"Final check for {len(fundamentally_strong_tickers)} tickers in {market}...")
             for ticker, fund_data in fundamentally_strong_tickers.items():
+                if self.is_cancelled():
+                    self._emit_progress("Scan cancelled by user.")
+                    break
                 # No need to increment processed_tickers again, just use the percentage for the second half
                 self._emit_percent(50 + int((processed_tickers / total_tickers) * 50))
 
