@@ -97,15 +97,13 @@ class ScenarioRunner:
 
     def _check_classic_signal(self, data: pd.DataFrame) -> tuple[bool, float, float, float]:
         """Checks for the 'Classic Oversold' signal."""
-        data['RSI'] = calculate_rsi(data['Close'], config.RSI_PERIOD)
-        data['SMA200'] = calculate_sma(data['Close'], config.SMA_SUPPORT_PERIOD)
-        data['Low90D'] = data['Low'].rolling(window=config.LOWEST_LOW_PERIOD).min()
-
+        # This function now only returns point-in-time values.
+        # The dataframe `data` that is passed in will be modified with indicators and then stored.
         latest_data = data.iloc[-1]
         current_price = latest_data['Close']
-        rsi = latest_data['RSI']
-        sma200 = latest_data['SMA200']
-        low90d = latest_data['Low90D']
+        rsi = data['RSI'].iloc[-1]
+        sma200 = data['SMA200'].iloc[-1]
+        low90d = data['Low90D'].iloc[-1]
 
         if pd.isna(current_price) or pd.isna(rsi):
             return False, np.nan, np.nan, np.nan
@@ -169,16 +167,23 @@ class ScenarioRunner:
                     continue
 
                 stock_data = data_loader.get_stock_data(ticker)
-                if stock_data is None or stock_data.empty:
+                if stock_data is None or stock_data.empty or len(stock_data) < config.SMA_SUPPORT_PERIOD:
                     continue
 
-                is_candidate, rsi, dist_sma, dist_low = self._check_classic_signal(stock_data.copy())
+                # Pre-calculate all indicators and add them as columns to the DataFrame
+                stock_data['RSI'] = calculate_rsi(stock_data['Close'], config.RSI_PERIOD)
+                stock_data['SMA50'] = calculate_sma(stock_data['Close'], 50)
+                stock_data['SMA200'] = calculate_sma(stock_data['Close'], config.SMA_SUPPORT_PERIOD)
+                stock_data['Low90D'] = stock_data['Low'].rolling(window=config.LOWEST_LOW_PERIOD).min()
+
+                is_candidate, rsi, dist_sma, dist_low = self._check_classic_signal(stock_data)
                 if not is_candidate:
                     continue
 
                 self._emit_progress(f"!!! {ticker} is a potential 'Classic Oversold' candidate!")
 
-                # Calculate the new adaptive score
+                # This was the site of the previous logical error.
+                # Now stock_info is guaranteed to be defined before this call.
                 score, tooltip = calculate_adaptive_score(stock_info, stock_data)
                 last_signal = find_recent_candlestick_patterns(stock_data)
 
@@ -188,6 +193,7 @@ class ScenarioRunner:
                     score=score,
                     tooltip_text=tooltip,
                     last_signal=last_signal,
+                    history_df=stock_data,
                     technicals={
                         'price': round(stock_data['Close'].iloc[-1], 2),
                         'rsi': round(rsi, 2),
@@ -259,12 +265,15 @@ class ScenarioRunner:
                 if stock_data is None or len(stock_data) < 200:
                     continue
 
+                stock_data['RSI'] = calculate_rsi(stock_data['Close'], config.RSI_PERIOD)
                 stock_data['SMA50'] = calculate_sma(stock_data['Close'], 50)
                 stock_data['SMA200'] = calculate_sma(stock_data['Close'], 200)
                 latest = stock_data.iloc[-1]
 
                 if pd.notna(latest['Close']) and pd.notna(latest['SMA50']) and pd.notna(latest['SMA200']):
                     if latest['Close'] > latest['SMA200'] and latest['SMA50'] > latest['SMA200']:
+                        # Store the dataframe in the cache to be used later
+                        ticker_info_cache[ticker]['stock_data'] = stock_data
                         technically_strong_tickers.append(ticker)
 
             if not technically_strong_tickers:
@@ -316,10 +325,11 @@ class ScenarioRunner:
                 # No need to increment processed_tickers again, just use the percentage for the second half
                 self._emit_percent(50 + int((processed_tickers / total_tickers) * 50))
 
-                stock_data = data_loader.get_stock_data(ticker)
+                stock_info = ticker_info_cache.get(ticker, {})
+                stock_data = stock_info.get('stock_data')
                 if stock_data is None: continue
 
-                stock_data['SMA50'] = calculate_sma(stock_data['Close'], 50)
+                # We don't need to recalculate the SMA50, it's already in the dataframe.
                 latest = stock_data.iloc[-1]
                 current_price = latest['Close']
                 sma50 = latest['SMA50']
@@ -340,14 +350,19 @@ class ScenarioRunner:
                         score, tooltip = calculate_adaptive_score(combined_info, stock_data)
                         last_signal = find_recent_candlestick_patterns(stock_data)
 
+                        # Retrieve the series from the cache
+                        series = ticker_info_cache.get(ticker, {}).get('series', {})
+
                         candidate = ReboundCandidate(
                             ticker=ticker,
                             scenario="Quality Stock Pullback",
                             score=score,
                             tooltip_text=tooltip,
                             last_signal=last_signal,
+                            history_df=stock_data,
                             technicals={
                                 'price': round(current_price, 2),
+                                'rsi': round(stock_data['RSI'].iloc[-1], 2),
                                 '50_sma_value': round(sma50, 2),
                                 'dist_sma_50': round(dist_to_sma50, 2)
                             },

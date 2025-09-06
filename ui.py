@@ -88,7 +88,7 @@ class PandasModel(QAbstractTableModel):
         super().__init__(parent)
         self._data = data
         self.numeric_columns = [
-            'AQS', 'RSI', 'Price', 'Dist_SMA(%)', 'Dist_Low(%)'
+            'AQS', 'Price', 'RSI'
         ]
 
     def rowCount(self, parent=None):
@@ -156,22 +156,19 @@ class ChartWindow(QWidget):
         self.plot_stock_data(candidate)
 
     def plot_stock_data(self, candidate: ReboundCandidate):
-        """Fetches stock data, calculates indicators, and plots the chart for the candidate."""
+        """Uses the pre-calculated data stored in the candidate to plot the chart."""
         try:
-            data = data_loader.get_stock_data(candidate.ticker)
+            # Use the DataFrame that was stored during the scan to ensure 100% consistency
+            data = candidate.history_df
             if data is None or data.empty:
-                QMessageBox.warning(self, "Data Error", f"Could not load historical data for {candidate.ticker}.")
+                QMessageBox.warning(self, "Data Error", f"Historical data for {candidate.ticker} was not found in the candidate object.")
                 return
 
-            # Address FutureWarning for .last()
+            # The indicators (RSI, SMAs) are already columns in the 'data' DataFrame.
+            # We just need to ensure we are only plotting the requested date range.
             end_date = data.index[-1]
             start_date = end_date - pd.DateOffset(months=config.CHART_HISTORY_MONTHS)
-            data = data.loc[start_date:end_date]
-
-            # Calculate all required indicators
-            data['SMA50'] = calculate_sma(data['Close'], 50)
-            data['SMA200'] = calculate_sma(data['Close'], config.SMA_SUPPORT_PERIOD)
-            data['RSI'] = calculate_rsi(data['Close'], config.RSI_PERIOD)
+            plot_data = data.loc[start_date:end_date]
 
             # --- Plotting ---
             fig = self.canvas.figure
@@ -196,23 +193,22 @@ class ChartWindow(QWidget):
             if candidate.scenario == "Quality Stock Pullback":
                 support_level = candidate.technicals.get('50_sma_value')
                 if support_level:
-                    # Plotting directly on the axis is fine for simple lines
                     self.ax.axhline(y=support_level, color='green', linestyle='--', label='50-Day SMA Support')
-                if not data['SMA50'].empty:
-                    # For more complex plots that need to align with the candlestick data, use make_addplot
-                    add_plots.append(mpf.make_addplot(data['SMA50'], ax=self.ax, color='green', width=0.7))
 
-            # Always plot 200 SMA for context
-            if not data['SMA200'].empty:
-                add_plots.append(mpf.make_addplot(data['SMA200'], ax=self.ax, color='blue', width=0.7))
+            # The SMAs are now columns in the plot_data df.
+            if 'SMA50' in plot_data.columns and not plot_data['SMA50'].empty:
+                add_plots.append(mpf.make_addplot(plot_data['SMA50'], ax=self.ax, color='green', width=0.7))
+            if 'SMA200' in plot_data.columns and not plot_data['SMA200'].empty:
+                add_plots.append(mpf.make_addplot(plot_data['SMA200'], ax=self.ax, color='blue', width=0.7))
 
             self.ax.set_title(f'{candidate.ticker} - {candidate.scenario}')
 
             # Main candle plot
-            mpf.plot(data, type='candle', ax=self.ax, volume=ax_vol, addplot=add_plots, style='yahoo')
+            mpf.plot(plot_data, type='candle', ax=self.ax, volume=ax_vol, addplot=add_plots, style='yahoo')
 
             # RSI Plot
-            ax_rsi.plot(data.index, data['RSI'], color='orange')
+            if 'RSI' in plot_data.columns and not plot_data['RSI'].empty:
+                ax_rsi.plot(plot_data.index, plot_data['RSI'], color='orange')
             ax_rsi.axhline(70, color='red', linestyle='--', linewidth=0.5)
             ax_rsi.axhline(30, color='green', linestyle='--', linewidth=0.5)
             ax_rsi.set_ylim(0, 100)
@@ -442,7 +438,8 @@ class MainWindow(QMainWindow):
                 "Letztes Signal": r.last_signal,
                 "Scenario": r.scenario,
                 "Price": r.technicals.get('price', '-'),
-                "AQSTooltip": r.tooltip_text # Add the tooltip text
+                "RSI": r.technicals.get('rsi', '-'),
+                "AQSTooltip": r.tooltip_text # This column is hidden but used by the model
             }
             results_list_of_dicts.append(res_dict)
 
