@@ -6,3 +6,4 @@ openpyxl
 matplotlib
 mplfinance
 aiohttp
+TA-Lib
