@@ -431,8 +431,9 @@ class MainWindow(QMainWindow):
             res_dict = {
                 "Ticker": r.ticker,
                 "Name": r.fundamentals.get('name', 'N/A'),
-                "Scenario": r.scenario,
                 "AQS": r.score,
+                "Letztes Signal": r.last_signal,
+                "Scenario": r.scenario,
                 "Price": r.technicals.get('price', '-'),
                 "AQSTooltip": r.tooltip_text # Add the tooltip text
             }

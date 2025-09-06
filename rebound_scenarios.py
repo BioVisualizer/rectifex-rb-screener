@@ -15,6 +15,7 @@ import data_loader
 from data_structures import ReboundCandidate
 from fundamental_fetcher import FundamentalFetcher
 from quality_scorer import calculate_adaptive_score, calculate_sma, calculate_rsi
+from pattern_recognizer import find_recent_candlestick_patterns
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -179,12 +180,14 @@ class ScenarioRunner:
 
                 # Calculate the new adaptive score
                 score, tooltip = calculate_adaptive_score(stock_info, stock_data)
+                last_signal = find_recent_candlestick_patterns(stock_data)
 
                 candidate = ReboundCandidate(
                     ticker=ticker,
                     scenario="Classic Oversold",
                     score=score,
                     tooltip_text=tooltip,
+                    last_signal=last_signal,
                     technicals={
                         'price': round(stock_data['Close'].iloc[-1], 2),
                         'rsi': round(rsi, 2),
@@ -335,12 +338,14 @@ class ScenarioRunner:
 
                         # Calculate the new adaptive score
                         score, tooltip = calculate_adaptive_score(combined_info, stock_data)
+                        last_signal = find_recent_candlestick_patterns(stock_data)
 
                         candidate = ReboundCandidate(
                             ticker=ticker,
                             scenario="Quality Stock Pullback",
                             score=score,
                             tooltip_text=tooltip,
+                            last_signal=last_signal,
                             technicals={
                                 'price': round(current_price, 2),
                                 '50_sma_value': round(sma50, 2),
