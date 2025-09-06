@@ -161,7 +161,11 @@ class ChartWindow(QWidget):
                 QMessageBox.warning(self, "Data Error", f"Could not load historical data for {candidate.ticker}.")
                 return
 
-            data = data.last(f'{config.CHART_HISTORY_MONTHS}M')
+            # Address FutureWarning for .last()
+            end_date = data.index[-1]
+            start_date = end_date - pd.DateOffset(months=config.CHART_HISTORY_MONTHS)
+            data = data.loc[start_date:end_date]
+
             # Calculate all required indicators
             data['SMA50'] = calculate_sma(data['Close'], 50)
             data['SMA200'] = calculate_sma(data['Close'], config.SMA_SUPPORT_PERIOD)
@@ -170,37 +174,46 @@ class ChartWindow(QWidget):
             # --- Plotting ---
             fig = self.canvas.figure
             fig.clf()
-            # Create axes
-            gs = fig.add_gridspec(3, 1)
-            self.ax = fig.add_subplot(gs[0:2, 0]) # Main plot
-            ax2 = fig.add_subplot(gs[2, 0], sharex=self.ax) # RSI plot
+
+            # Create axes for candlestick, volume, and RSI
+            gs = fig.add_gridspec(3, 1, height_ratios=[2, 1, 1])
+            self.ax = fig.add_subplot(gs[0, 0]) # Main plot for price
+            ax_vol = fig.add_subplot(gs[1, 0], sharex=self.ax) # Volume plot
+            ax_rsi = fig.add_subplot(gs[2, 0], sharex=self.ax) # RSI plot
+
+            # Remove x-axis labels from the main and volume plots for a cleaner look
+            self.ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+            ax_vol.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
 
             self.ax.set_ylabel('Price')
-            ax2.set_ylabel('RSI')
+            ax_vol.set_ylabel('Volume')
+            ax_rsi.set_ylabel('RSI')
 
             # --- Dynamic Overlays ---
             add_plots = []
             if candidate.scenario == "Quality Stock Pullback":
                 support_level = candidate.technicals.get('50_sma_value')
                 if support_level:
+                    # Plotting directly on the axis is fine for simple lines
                     self.ax.axhline(y=support_level, color='green', linestyle='--', label='50-Day SMA Support')
                 if not data['SMA50'].empty:
-                    add_plots.append(mpf.make_addplot(data['SMA50'], color='green', width=0.7))
+                    # For more complex plots that need to align with the candlestick data, use make_addplot
+                    add_plots.append(mpf.make_addplot(data['SMA50'], ax=self.ax, color='green', width=0.7))
 
             # Always plot 200 SMA for context
             if not data['SMA200'].empty:
-                add_plots.append(mpf.make_addplot(data['SMA200'], color='blue', width=0.7))
+                add_plots.append(mpf.make_addplot(data['SMA200'], ax=self.ax, color='blue', width=0.7))
 
             # Main candle plot
-            mpf.plot(data, type='candle', ax=self.ax, volume=self.ax.twinx(), addplot=add_plots, style='yahoo',
+            mpf.plot(data, type='candle', ax=self.ax, volume=ax_vol, addplot=add_plots, style='yahoo',
                     title=f'{candidate.ticker} - {candidate.scenario}')
 
             # RSI Plot
-            ax2.plot(data.index, data['RSI'], color='orange')
-            ax2.axhline(70, color='red', linestyle='--', linewidth=0.5)
-            ax2.axhline(30, color='green', linestyle='--', linewidth=0.5)
-            ax2.set_ylim(0, 100)
-            ax2.grid(True)
+            ax_rsi.plot(data.index, data['RSI'], color='orange')
+            ax_rsi.axhline(70, color='red', linestyle='--', linewidth=0.5)
+            ax_rsi.axhline(30, color='green', linestyle='--', linewidth=0.5)
+            ax_rsi.set_ylim(0, 100)
+            ax_rsi.grid(True)
 
             # --- Information Box ---
             eps_growth = candidate.fundamentals.get('earningsGrowth')
