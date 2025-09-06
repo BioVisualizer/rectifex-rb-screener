@@ -204,9 +204,10 @@ class ChartWindow(QWidget):
             if not data['SMA200'].empty:
                 add_plots.append(mpf.make_addplot(data['SMA200'], ax=self.ax, color='blue', width=0.7))
 
+            self.ax.set_title(f'{candidate.ticker} - {candidate.scenario}')
+
             # Main candle plot
-            mpf.plot(data, type='candle', ax=self.ax, volume=ax_vol, addplot=add_plots, style='yahoo',
-                    title=f'{candidate.ticker} - {candidate.scenario}')
+            mpf.plot(data, type='candle', ax=self.ax, volume=ax_vol, addplot=add_plots, style='yahoo')
 
             # RSI Plot
             ax_rsi.plot(data.index, data['RSI'], color='orange')
