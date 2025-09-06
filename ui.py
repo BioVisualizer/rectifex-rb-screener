@@ -29,7 +29,7 @@ import data_loader
 from ticker_manager import TickerManagerDialog
 from data_structures import ReboundCandidate
 from fundamental_fetcher import FundamentalFetcher
-from rebound_scenarios import ScenarioRunner, calculate_sma, calculate_rsi
+from rebound_scenarios import ScenarioRunner
 
 # --- Worker Thread for Running Analysis ---
 
@@ -88,7 +88,7 @@ class PandasModel(QAbstractTableModel):
         super().__init__(parent)
         self._data = data
         self.numeric_columns = [
-            'AQS', 'Price', 'RSI'
+            'Score', 'RSI', 'Price', 'Dist_SMA(%)', 'Dist_Low(%)'
         ]
 
     def rowCount(self, parent=None):
@@ -113,19 +113,24 @@ class PandasModel(QAbstractTableModel):
                 return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 
         if role == Qt.ItemDataRole.BackgroundRole:
-            if "AQS" in self._data.columns:
-                score = self._data.iloc[row]["AQS"]
-                if score > 80:
-                    return QColor("#d4edda")
-                elif score > 60:
-                    return QColor("#fff3cd")
+            score = self._data.iloc[row]["Score"]
+            if score > 80:
+                return QColor("#d4edda")
+            elif score > 60:
+                return QColor("#fff3cd")
 
-        if role == Qt.ItemDataRole.ToolTipRole and column_name == "AQS":
-            # The proxy model ensures that the index passed to the source model's
-            # data() function already corresponds to the correct row in the source data.
-            # We just need to find the hidden 'AQSTooltip' column in our source data.
-            if "AQSTooltip" in self._data.columns:
-                return self._data.iloc[row]["AQSTooltip"]
+        if role == Qt.ItemDataRole.ToolTipRole and column_name == "Score":
+            base_tooltip = "Overall score (0-100) that rates the rebound potential. Higher is better."
+
+            # Check if the score breakdown columns exist for this row
+            if 'RSI_Score' in self._data.columns and 'Prox_Score' in self._data.columns:
+                rsi_score = self._data.iloc[row]["RSI_Score"]
+                prox_score = self._data.iloc[row]["Prox_Score"]
+                # Also check if they are not NaN or some other placeholder
+                if pd.notna(rsi_score) and pd.notna(prox_score):
+                    breakdown_tooltip = f"\n\nBreakdown ('Classic Oversold'):\n- RSI Score: {int(rsi_score)} / 60\n- Proximity Score: {int(prox_score)} / 40"
+                    return base_tooltip + breakdown_tooltip
+            return base_tooltip
 
         return None
 
@@ -164,11 +169,9 @@ class ChartWindow(QWidget):
                 QMessageBox.warning(self, "Data Error", f"Historical data for {candidate.ticker} was not found in the candidate object.")
                 return
 
-            # The indicators (RSI, SMAs) are already columns in the 'data' DataFrame.
-            # We just need to ensure we are only plotting the requested date range.
-            end_date = data.index[-1]
-            start_date = end_date - pd.DateOffset(months=config.CHART_HISTORY_MONTHS)
-            plot_data = data.loc[start_date:end_date]
+            # Slicing by tail is more robust than by date range.
+            num_days = config.CHART_HISTORY_MONTHS * 22 # Approx. 22 trading days per month
+            plot_data = data.tail(num_days)
 
             # --- Plotting ---
             fig = self.canvas.figure
@@ -195,7 +198,6 @@ class ChartWindow(QWidget):
                 if support_level:
                     self.ax.axhline(y=support_level, color='green', linestyle='--', label='50-Day SMA Support')
 
-            # The SMAs are now columns in the plot_data df.
             if 'SMA50' in plot_data.columns and not plot_data['SMA50'].empty:
                 add_plots.append(mpf.make_addplot(plot_data['SMA50'], ax=self.ax, color='green', width=0.7))
             if 'SMA200' in plot_data.columns and not plot_data['SMA200'].empty:
@@ -242,7 +244,6 @@ class ChartWindow(QWidget):
             if handles:
                 self.ax.legend(handles, labels)
 
-            fig.tight_layout()
             self.canvas.draw()
         except Exception as e:
             logging.error(f"Failed to plot chart for {candidate.ticker}: {e}", exc_info=True)
@@ -342,18 +343,18 @@ class MainWindow(QMainWindow):
         <p>This application scans global stock markets to identify potential long-rebound candidates based on technical analysis criteria.</p>
         <p>This application was developed by Lukas Morcinek.</p>
         <hr>
-        <p><b>Scanning Scenarios & AQS</b></p>
+        <p><b>Scanning Scenarios & Score</b></p>
         <p>The application uses different scenarios to find potential candidates:</p>
         <ul>
-            <li><b>Classic Oversold:</b> This scenario looks for technically oversold stocks that are near strong support levels (like the 200-day average or the 90-day low).</li>
-            <li><b>Quality Stock Pullback:</b> This scenario looks for fundamentally sound companies in a long-term uptrend that have recently experienced a small pullback towards their 50-day average.</li>
+            <li><b>Classic Oversold:</b> This scenario looks for technically oversold stocks that are near strong support levels (like the 200-day average or the 90-day low). The score (0-100) is primarily based on the RSI (Relative Strength Index) and proximity to these supports.</li>
+            <li><b>Quality Stock Pullback:</b> This scenario looks for fundamentally sound companies in a long-term uptrend that have recently experienced a small pullback towards their 50-day average. The score assesses the strength of the fundamental profile and the proximity to the 50-day average.</li>
         </ul>
         <p><b>Column Explanations:</b></p>
         <ul>
             <li><b>Ticker:</b> The stock ticker symbol of the company.</li>
             <li><b>Name:</b> The name of the company.</li>
             <li><b>Scenario:</b> The screening scenario that qualified the stock.</li>
-            <li><b>AQS (Adaptive Quality Score):</b> A score (0-100) that rates the stock's quality based on available data. It adaptively calculates the score, meaning a stock isn't penalized for missing data (e.g. from yfinance). Hover over a cell to see which criteria were used in the calculation.</li>
+            <li><b>Score:</b> A weighted score (0-100) that rates the rebound potential. Higher is better. Hover over a cell for details.</li>
             <li><b>Price:</b> The last closing price of the stock.</li>
         </ul>
         <hr>
@@ -434,32 +435,22 @@ class MainWindow(QMainWindow):
             res_dict = {
                 "Ticker": r.ticker,
                 "Name": r.fundamentals.get('name', 'N/A'),
-                "AQS": r.score,
-                "Letztes Signal": r.last_signal,
                 "Scenario": r.scenario,
+                "Score": r.score,
                 "Price": r.technicals.get('price', '-'),
-                "RSI": r.technicals.get('rsi', '-'),
-                "AQSTooltip": r.tooltip_text # This column is hidden but used by the model
+                # Add sub-scores for tooltip, using .get() to avoid KeyErrors for scenarios that don't have them
+                "RSI_Score": r.technicals.get('rsi_score'),
+                "Prox_Score": r.technicals.get('prox_score'),
             }
             results_list_of_dicts.append(res_dict)
 
         self.results_df = pd.DataFrame(results_list_of_dicts)
         self.all_candidates_data = results # Keep the original objects for charting
 
-        # The model needs the full data, including the tooltip column
         model = PandasModel(self.results_df)
         proxy_model = QSortFilterProxyModel()
         proxy_model.setSourceModel(model)
         self.table_view.setModel(proxy_model)
-
-        # Hide the 'AQSTooltip' column from the user's view
-        try:
-            # Get the column index from the original dataframe
-            tooltip_col_index = self.results_df.columns.get_loc("AQSTooltip")
-            self.table_view.setColumnHidden(tooltip_col_index, True)
-        except KeyError:
-            pass # Column not found, do nothing
-
         self.table_view.resizeColumnsToContents()
         self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         # Allow interactive resizing for specific columns
@@ -467,9 +458,9 @@ class MainWindow(QMainWindow):
         self.table_view.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Szenario
 
 
-        # Automatically sort by the 'AQS' column, descending
+        # Automatically sort by the 'Score' column, descending
         try:
-            score_col_index = self.results_df.columns.get_loc("AQS")
+            score_col_index = self.results_df.columns.get_loc("Score")
             self.table_view.sortByColumn(score_col_index, Qt.SortOrder.DescendingOrder)
         except KeyError:
             pass # No score column

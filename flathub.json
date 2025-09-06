@@ -13,23 +13,6 @@
     ],
     "modules": [
         {
-            "name": "ta-lib",
-            "buildsystem": "simple",
-            "build-commands": [
-                "sed -i 's|/usr/include|/app/include|g' configure",
-                "./configure --prefix=/app",
-                "make",
-                "make install"
-            ],
-            "sources": [
-                {
-                    "type": "archive",
-                    "url": "http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz",
-                    "sha256": "9ff41efcb1c011a4b4b6dfc91610b06e39b1d7973ed5d4dee55029a0ac4dc651"
-                }
-            ]
-        },
-        {
             "name": "rectifex-rb",
             "buildsystem": "simple",
             "build-options": {
@@ -46,7 +29,6 @@
                 "install -D fundamental_fetcher.py /app/fundamental_fetcher.py",
                 "install -D rebound_scenarios.py /app/rebound_scenarios.py",
                 "install -D quality_scorer.py /app/quality_scorer.py",
-                "install -D pattern_recognizer.py /app/pattern_recognizer.py",
                 "install -D data_loader.py /app/data_loader.py",
                 "install -D ticker_manager.py /app/ticker_manager.py",
                 "install -D config.py /app/config.py",

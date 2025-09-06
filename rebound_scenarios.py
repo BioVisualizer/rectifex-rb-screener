@@ -14,14 +14,29 @@ import config
 import data_loader
 from data_structures import ReboundCandidate
 from fundamental_fetcher import FundamentalFetcher
-from quality_scorer import calculate_adaptive_score, calculate_sma, calculate_rsi
-from pattern_recognizer import find_recent_candlestick_patterns
+
+def calculate_sma(data: pd.Series, window: int) -> pd.Series:
+    """Calculates the Simple Moving Average."""
+    if data is None or len(data) < window:
+        return pd.Series(dtype=np.float64)
+    return data.rolling(window=window).mean()
+
+def calculate_rsi(data: pd.Series, window: int = 14) -> pd.Series:
+    """Calculates the Relative Strength Index (RSI)."""
+    if data is None or len(data) < window:
+        return pd.Series(dtype=np.float64)
+    delta = data.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-# --- Helper Functions (moved from analysis.py) ---
+# --- Helper Functions ---
 
 def passes_market_context_filter(index_data: pd.DataFrame) -> bool:
     """Checks if the market index is in a positive trend (above its 50-day SMA)."""
@@ -95,15 +110,23 @@ class ScenarioRunner:
         if self.progress_percent_callback:
             self.progress_percent_callback.emit(percent)
 
+    def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculates all necessary indicators and adds them to the dataframe."""
+        if df is None or df.empty:
+            return pd.DataFrame()
+        df['RSI'] = calculate_rsi(df['Close'], config.RSI_PERIOD)
+        df['SMA50'] = calculate_sma(df['Close'], 50)
+        df['SMA200'] = calculate_sma(df['Close'], config.SMA_SUPPORT_PERIOD)
+        df['Low90D'] = df['Low'].rolling(window=config.LOWEST_LOW_PERIOD).min()
+        return df
+
     def _check_classic_signal(self, data: pd.DataFrame) -> tuple[bool, float, float, float]:
         """Checks for the 'Classic Oversold' signal."""
-        # This function now only returns point-in-time values.
-        # The dataframe `data` that is passed in will be modified with indicators and then stored.
         latest_data = data.iloc[-1]
         current_price = latest_data['Close']
-        rsi = data['RSI'].iloc[-1]
-        sma200 = data['SMA200'].iloc[-1]
-        low90d = data['Low90D'].iloc[-1]
+        rsi = latest_data['RSI']
+        sma200 = latest_data['SMA200']
+        low90d = latest_data['Low90D']
 
         if pd.isna(current_price) or pd.isna(rsi):
             return False, np.nan, np.nan, np.nan
@@ -119,6 +142,27 @@ class ScenarioRunner:
                 is_candidate_B = True
 
         return is_candidate_A or is_candidate_B, rsi, dist_to_sma, dist_to_low
+
+    def _calculate_classic_score(self, rsi: float, dist_to_sma: float, dist_to_low: float) -> tuple[int, int, int]:
+        """
+        Calculates the rebound score and its components.
+        Returns the final score, the RSI sub-score, and the proximity sub-score.
+        """
+        rsi_score = max(0, (config.RSI_SCORE_CEILING - rsi) * (100 / (config.RSI_SCORE_CEILING - config.RSI_OVERSOLD_STRONG)))
+        rsi_score = int(min(100, rsi_score))
+
+        prox_dist = np.inf
+        if dist_to_sma >= 0: prox_dist = min(prox_dist, dist_to_sma)
+        if dist_to_low >= 0: prox_dist = min(prox_dist, dist_to_low)
+
+        if prox_dist > config.PROXIMITY_SCORE_CEILING:
+            proximity_score = 0
+        else:
+            proximity_score = (config.PROXIMITY_SCORE_CEILING - prox_dist) * (100 / config.PROXIMITY_SCORE_CEILING)
+        proximity_score = int(max(0, min(100, proximity_score)))
+
+        final_score = int((0.6 * rsi_score) + (0.4 * proximity_score))
+        return final_score, rsi_score, proximity_score
 
     def run_classic_oversold(self) -> List[ReboundCandidate]:
         """
@@ -170,35 +214,27 @@ class ScenarioRunner:
                 if stock_data is None or stock_data.empty or len(stock_data) < config.SMA_SUPPORT_PERIOD:
                     continue
 
-                # Pre-calculate all indicators and add them as columns to the DataFrame
-                stock_data['RSI'] = calculate_rsi(stock_data['Close'], config.RSI_PERIOD)
-                stock_data['SMA50'] = calculate_sma(stock_data['Close'], 50)
-                stock_data['SMA200'] = calculate_sma(stock_data['Close'], config.SMA_SUPPORT_PERIOD)
-                stock_data['Low90D'] = stock_data['Low'].rolling(window=config.LOWEST_LOW_PERIOD).min()
+                stock_data = self._prepare_dataframe(stock_data)
 
                 is_candidate, rsi, dist_sma, dist_low = self._check_classic_signal(stock_data)
                 if not is_candidate:
                     continue
 
                 self._emit_progress(f"!!! {ticker} is a potential 'Classic Oversold' candidate!")
-
-                # This was the site of the previous logical error.
-                # Now stock_info is guaranteed to be defined before this call.
-                score, tooltip = calculate_adaptive_score(stock_info, stock_data)
-                last_signal = find_recent_candlestick_patterns(stock_data)
+                score, rsi_score, prox_score = self._calculate_classic_score(rsi, dist_sma, dist_low)
 
                 candidate = ReboundCandidate(
                     ticker=ticker,
                     scenario="Classic Oversold",
                     score=score,
-                    tooltip_text=tooltip,
-                    last_signal=last_signal,
                     history_df=stock_data,
                     technicals={
                         'price': round(stock_data['Close'].iloc[-1], 2),
                         'rsi': round(rsi, 2),
                         'dist_sma_200': round(dist_sma, 2),
-                        'dist_low_90d': round(dist_low, 2)
+                        'dist_low_90d': round(dist_low, 2),
+                        'rsi_score': rsi_score,
+                        'prox_score': prox_score
                     },
                     fundamentals={'name': stock_info.get('shortName', 'N/A')}
                 )
@@ -265,14 +301,11 @@ class ScenarioRunner:
                 if stock_data is None or len(stock_data) < 200:
                     continue
 
-                stock_data['RSI'] = calculate_rsi(stock_data['Close'], config.RSI_PERIOD)
-                stock_data['SMA50'] = calculate_sma(stock_data['Close'], 50)
-                stock_data['SMA200'] = calculate_sma(stock_data['Close'], 200)
+                stock_data = self._prepare_dataframe(stock_data)
                 latest = stock_data.iloc[-1]
 
                 if pd.notna(latest['Close']) and pd.notna(latest['SMA50']) and pd.notna(latest['SMA200']):
                     if latest['Close'] > latest['SMA200'] and latest['SMA50'] > latest['SMA200']:
-                        # Store the dataframe in the cache to be used later
                         ticker_info_cache[ticker]['stock_data'] = stock_data
                         technically_strong_tickers.append(ticker)
 
@@ -329,7 +362,7 @@ class ScenarioRunner:
                 stock_data = stock_info.get('stock_data')
                 if stock_data is None: continue
 
-                # We don't need to recalculate the SMA50, it's already in the dataframe.
+                # Indicators are already calculated, just get the latest values
                 latest = stock_data.iloc[-1]
                 current_price = latest['Close']
                 sma50 = latest['SMA50']
@@ -338,27 +371,16 @@ class ScenarioRunner:
                     dist_to_sma50 = abs((current_price - sma50) / sma50) * 100
                     if dist_to_sma50 <= 3.0:
                         self._emit_progress(f"!!! {ticker} is a potential 'Quality Pullback' candidate!")
+                        prox_score = 100 - (dist_to_sma50 / 3.0 * 100)
+                        fund_score = (fund_data.get('earningsGrowth', 0) * 100)
+                        score = int(0.7 * prox_score + 0.3 * fund_score)
 
-                        # Add company name to fundamentals from the pre-fetched info
+                        # Add company name to fundamentals
                         stock_info = ticker_info_cache.get(ticker, {})
-                        # The fundamental_data from the bulk fetch might be more complete, so merge them
-                        # giving preference to the more detailed `fund_data`
-                        combined_info = {**stock_info, **fund_data}
-                        combined_info['name'] = stock_info.get('shortName', 'N/A')
-
-                        # Calculate the new adaptive score
-                        score, tooltip = calculate_adaptive_score(combined_info, stock_data)
-                        last_signal = find_recent_candlestick_patterns(stock_data)
-
-                        # Retrieve the series from the cache
-                        series = ticker_info_cache.get(ticker, {}).get('series', {})
+                        fund_data['name'] = stock_info.get('shortName', 'N/A')
 
                         candidate = ReboundCandidate(
-                            ticker=ticker,
-                            scenario="Quality Stock Pullback",
-                            score=score,
-                            tooltip_text=tooltip,
-                            last_signal=last_signal,
+                            ticker=ticker, scenario="Quality Stock Pullback", score=min(100, score),
                             history_df=stock_data,
                             technicals={
                                 'price': round(current_price, 2),
@@ -366,7 +388,7 @@ class ScenarioRunner:
                                 '50_sma_value': round(sma50, 2),
                                 'dist_sma_50': round(dist_to_sma50, 2)
                             },
-                            fundamentals=combined_info
+                            fundamentals=fund_data
                         )
                         all_candidates.append(candidate)
 
