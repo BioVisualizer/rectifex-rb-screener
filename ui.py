@@ -98,33 +98,35 @@ class PandasModel(QAbstractTableModel):
         return self._data.shape[1]
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if index.isValid():
-            # When using a proxy model, we need to get the correct row from the source dataframe
-            source_row = index.row()
-            if self.parent() and isinstance(self.parent(), QSortFilterProxyModel):
-                source_index = self.parent().mapToSource(index)
-                source_row = source_index.row()
+        if not index.isValid():
+            return None
 
-            column_name = self._data.columns[index.column()]
+        row = index.row()
+        col = index.column()
+        column_name = self._data.columns[col]
 
-            if role == Qt.ItemDataRole.DisplayRole:
-                return str(self._data.iloc[source_row, index.column()])
+        if role == Qt.ItemDataRole.DisplayRole:
+            return str(self._data.iloc[row, col])
 
-            if role == Qt.ItemDataRole.TextAlignmentRole:
-                if column_name in self.numeric_columns:
-                    return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        if role == Qt.ItemDataRole.TextAlignmentRole:
+            if column_name in self.numeric_columns:
+                return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 
-            if role == Qt.ItemDataRole.BackgroundRole:
-                if "AQS" in self._data.columns:
-                    score = self._data.iloc[source_row]["AQS"]
-                    if score > 80:
-                        return QColor("#d4edda")
-                    elif score > 60:
-                        return QColor("#fff3cd")
+        if role == Qt.ItemDataRole.BackgroundRole:
+            if "AQS" in self._data.columns:
+                score = self._data.iloc[row]["AQS"]
+                if score > 80:
+                    return QColor("#d4edda")
+                elif score > 60:
+                    return QColor("#fff3cd")
 
-            if role == Qt.ItemDataRole.ToolTipRole and column_name == "AQS":
-                if "AQSTooltip" in self._data.columns:
-                    return self._data.iloc[source_row]["AQSTooltip"]
+        if role == Qt.ItemDataRole.ToolTipRole and column_name == "AQS":
+            # The proxy model ensures that the index passed to the source model's
+            # data() function already corresponds to the correct row in the source data.
+            # We just need to find the hidden 'AQSTooltip' column in our source data.
+            if "AQSTooltip" in self._data.columns:
+                return self._data.iloc[row]["AQSTooltip"]
+
         return None
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
@@ -175,19 +177,19 @@ class ChartWindow(QWidget):
             fig = self.canvas.figure
             fig.clf()
 
-            # Create axes for candlestick, volume, and RSI
-            gs = fig.add_gridspec(3, 1, height_ratios=[2, 1, 1])
-            self.ax = fig.add_subplot(gs[0, 0]) # Main plot for price
-            ax_vol = fig.add_subplot(gs[1, 0], sharex=self.ax) # Volume plot
-            ax_rsi = fig.add_subplot(gs[2, 0], sharex=self.ax) # RSI plot
-
-            # Remove x-axis labels from the main and volume plots for a cleaner look
-            self.ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
-            ax_vol.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+            # Create axes for candlestick, volume, and RSI using a more robust method
+            (self.ax, ax_vol, ax_rsi) = fig.subplots(3, 1, sharex=True,
+                                                     height_ratios=[3, 1, 1],
+                                                     gridspec_kw={'hspace': 0.05})
+            fig.subplots_adjust(hspace=0)
 
             self.ax.set_ylabel('Price')
             ax_vol.set_ylabel('Volume')
             ax_rsi.set_ylabel('RSI')
+
+            # Remove x-axis labels from the main and volume plots for a cleaner look
+            self.ax.tick_params(axis='x', labelbottom=False)
+            ax_vol.tick_params(axis='x', labelbottom=False)
 
             # --- Dynamic Overlays ---
             add_plots = []
@@ -239,7 +241,11 @@ class ChartWindow(QWidget):
             self.ax.text(0.02, 0.98, info_text, transform=self.ax.transAxes, fontsize=9,
                         verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5))
 
-            self.ax.legend()
+            # Only show legend if there are labeled items
+            handles, labels = self.ax.get_legend_handles_labels()
+            if handles:
+                self.ax.legend(handles, labels)
+
             fig.tight_layout()
             self.canvas.draw()
         except Exception as e:
@@ -443,6 +449,7 @@ class MainWindow(QMainWindow):
         self.results_df = pd.DataFrame(results_list_of_dicts)
         self.all_candidates_data = results # Keep the original objects for charting
 
+        # The model needs the full data, including the tooltip column
         model = PandasModel(self.results_df)
         proxy_model = QSortFilterProxyModel()
         proxy_model.setSourceModel(model)
@@ -450,6 +457,7 @@ class MainWindow(QMainWindow):
 
         # Hide the 'AQSTooltip' column from the user's view
         try:
+            # Get the column index from the original dataframe
             tooltip_col_index = self.results_df.columns.get_loc("AQSTooltip")
             self.table_view.setColumnHidden(tooltip_col_index, True)
         except KeyError:
