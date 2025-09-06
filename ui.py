@@ -155,69 +155,82 @@ class ChartWindow(QWidget):
 
     def plot_stock_data(self, candidate: ReboundCandidate):
         """Fetches stock data, calculates indicators, and plots the chart for the candidate."""
-        data = data_loader.get_stock_data(candidate.ticker)
-        if data is None or data.empty:
-            QMessageBox.warning(self, "Data Error", f"Could not load data for {candidate.ticker}.")
-            return
+        try:
+            data = data_loader.get_stock_data(candidate.ticker)
+            if data is None or data.empty:
+                QMessageBox.warning(self, "Data Error", f"Could not load historical data for {candidate.ticker}.")
+                return
 
-        data = data.last(f'{config.CHART_HISTORY_MONTHS}M')
-        # Calculate all required indicators
-        data['SMA50'] = calculate_sma(data['Close'], 50)
-        data['SMA200'] = calculate_sma(data['Close'], config.SMA_SUPPORT_PERIOD)
-        data['RSI'] = calculate_rsi(data['Close'], config.RSI_PERIOD)
+            data = data.last(f'{config.CHART_HISTORY_MONTHS}M')
+            # Calculate all required indicators
+            data['SMA50'] = calculate_sma(data['Close'], 50)
+            data['SMA200'] = calculate_sma(data['Close'], config.SMA_SUPPORT_PERIOD)
+            data['RSI'] = calculate_rsi(data['Close'], config.RSI_PERIOD)
 
-        # --- Plotting ---
-        fig = self.canvas.figure
-        fig.clf()
-        # Create axes
-        gs = fig.add_gridspec(3, 1)
-        self.ax = fig.add_subplot(gs[0:2, 0]) # Main plot
-        ax2 = fig.add_subplot(gs[2, 0], sharex=self.ax) # RSI plot
+            # --- Plotting ---
+            fig = self.canvas.figure
+            fig.clf()
+            # Create axes
+            gs = fig.add_gridspec(3, 1)
+            self.ax = fig.add_subplot(gs[0:2, 0]) # Main plot
+            ax2 = fig.add_subplot(gs[2, 0], sharex=self.ax) # RSI plot
 
-        self.ax.set_ylabel('Price')
-        ax2.set_ylabel('RSI')
+            self.ax.set_ylabel('Price')
+            ax2.set_ylabel('RSI')
 
-        # --- Dynamic Overlays ---
-        add_plots = []
-        if candidate.scenario == "Quality Stock Pullback":
-            support_level = candidate.technicals.get('50_sma_value')
-            if support_level:
-                self.ax.axhline(y=support_level, color='green', linestyle='--', label='50-Day SMA Support')
-            if not data['SMA50'].empty:
-                 add_plots.append(mpf.make_addplot(data['SMA50'], color='green', width=0.7))
+            # --- Dynamic Overlays ---
+            add_plots = []
+            if candidate.scenario == "Quality Stock Pullback":
+                support_level = candidate.technicals.get('50_sma_value')
+                if support_level:
+                    self.ax.axhline(y=support_level, color='green', linestyle='--', label='50-Day SMA Support')
+                if not data['SMA50'].empty:
+                    add_plots.append(mpf.make_addplot(data['SMA50'], color='green', width=0.7))
 
-        # Always plot 200 SMA for context
-        if not data['SMA200'].empty:
-            add_plots.append(mpf.make_addplot(data['SMA200'], color='blue', width=0.7))
+            # Always plot 200 SMA for context
+            if not data['SMA200'].empty:
+                add_plots.append(mpf.make_addplot(data['SMA200'], color='blue', width=0.7))
 
-        # Main candle plot
-        mpf.plot(data, type='candle', ax=self.ax, volume=self.ax.twinx(), addplot=add_plots, style='yahoo',
-                 title=f'{candidate.ticker} - {candidate.scenario}')
+            # Main candle plot
+            mpf.plot(data, type='candle', ax=self.ax, volume=self.ax.twinx(), addplot=add_plots, style='yahoo',
+                    title=f'{candidate.ticker} - {candidate.scenario}')
 
-        # RSI Plot
-        ax2.plot(data.index, data['RSI'], color='orange')
-        ax2.axhline(70, color='red', linestyle='--', linewidth=0.5)
-        ax2.axhline(30, color='green', linestyle='--', linewidth=0.5)
-        ax2.set_ylim(0, 100)
-        ax2.grid(True)
+            # RSI Plot
+            ax2.plot(data.index, data['RSI'], color='orange')
+            ax2.axhline(70, color='red', linestyle='--', linewidth=0.5)
+            ax2.axhline(30, color='green', linestyle='--', linewidth=0.5)
+            ax2.set_ylim(0, 100)
+            ax2.grid(True)
 
-        # --- Information Box ---
-        eps_growth_str = f"{candidate.fundamentals.get('earningsGrowth', 0) * 100:.2f}%" if candidate.fundamentals.get('earningsGrowth') is not None else "N/A"
-        rev_growth_str = f"{candidate.fundamentals.get('revenueGrowth', 0) * 100:.2f}%" if candidate.fundamentals.get('revenueGrowth') is not None else "N/A"
+            # --- Information Box ---
+            eps_growth = candidate.fundamentals.get('earningsGrowth')
+            eps_growth_str = f"{eps_growth * 100:.2f}%" if eps_growth is not None else "N/A"
 
-        info_text = (
-            f"Scenario: {candidate.scenario}\n"
-            f"Price: ${candidate.technicals.get('price', 0):.2f}\n"
-            f"RSI: {candidate.technicals.get('rsi', 0):.1f}\n"
-            f"EPS Growth: {eps_growth_str}\n"
-            f"Revenue Growth: {rev_growth_str}"
-        )
-        self.ax.text(0.02, 0.98, info_text, transform=self.ax.transAxes, fontsize=9,
-                     verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5))
+            rev_growth = candidate.fundamentals.get('revenueGrowth')
+            rev_growth_str = f"{rev_growth * 100:.2f}%" if rev_growth is not None else "N/A"
 
-        self.ax.legend()
-        fig.tight_layout()
-        self.canvas.draw()
+            price = candidate.technicals.get('price')
+            price_str = f"${price:.2f}" if price is not None else "N/A"
+
+            rsi = candidate.technicals.get('rsi')
+            rsi_str = f"{rsi:.1f}" if rsi is not None else "N/A"
+
+            info_text = (
+                f"Scenario: {candidate.scenario}\n"
+                f"Price: {price_str}\n"
+                f"RSI: {rsi_str}\n"
+                f"EPS Growth: {eps_growth_str}\n"
+                f"Revenue Growth: {rev_growth_str}"
+            )
+            self.ax.text(0.02, 0.98, info_text, transform=self.ax.transAxes, fontsize=9,
+                        verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5))
+
+            self.ax.legend()
+            fig.tight_layout()
+            self.canvas.draw()
+        except Exception as e:
+            logging.error(f"Failed to plot chart for {candidate.ticker}: {e}", exc_info=True)
+            QMessageBox.critical(self, "Chart Error", f"An unexpected error occurred while plotting the chart for {candidate.ticker}:\n\n{e}")
 
 
 # --- Main Application Window ---
