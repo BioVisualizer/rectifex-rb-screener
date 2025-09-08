@@ -187,6 +187,9 @@ class ChartWindow(QWidget):
             fig.clf()
 
             # 3. Plot the data
+            # Pass the canvas's figure to mplfinance to plot on. This ensures mplfinance draws on our
+            # existing canvas instead of creating a new figure, and it resolves a crash related to
+            # incorrect object types being returned and unpacked.
             fig, axes = mpf.plot(plot_data,
                           type='candle',
                           style='yahoo',
@@ -194,10 +197,12 @@ class ChartWindow(QWidget):
                           volume=True,
                           addplot=add_plots,
                           panel_ratios=(3, 1, 1),
-                          returnfig=True # Important: returns the figure and axes
+                          returnfig=True, # Important: returns the figure and axes
+                          fig=fig # Use the figure associated with the canvas
                          )
 
             # --- Information Box ---
+            # axes[0] is the main chart panel as defined by mplfinance
             main_ax = axes[0]
             eps_growth = candidate.fundamentals.get('earningsGrowth')
             eps_growth_str = f"{eps_growth * 100:.2f}%" if eps_growth is not None else "N/A"
