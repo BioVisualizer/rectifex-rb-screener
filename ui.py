@@ -205,6 +205,14 @@ class ChartWindow(QWidget):
 
             self.ax.set_title(f'{candidate.ticker} - {candidate.scenario}')
 
+            # --- DEBUGGING: Log the data just before plotting ---
+            logging.info("--- Chart Data Debug ---")
+            logging.info(f"Data shape passed to plot: {plot_data.shape}")
+            logging.info(f"Data index type: {type(plot_data.index)}")
+            logging.info("Data Head:\n" + plot_data.head().to_string())
+            logging.info("Data Tail:\n" + plot_data.tail().to_string())
+            logging.info("--- End Chart Data Debug ---")
+
             # Main candle plot
             mpf.plot(plot_data, type='candle', ax=self.ax, volume=ax_vol, addplot=add_plots, style='yahoo')
 
