@@ -156,87 +156,58 @@ class ChartWindow(QWidget):
         self.setLayout(layout)
         self.canvas = FigureCanvas(Figure(figsize=(8, 6)))
         layout.addWidget(self.canvas)
-        self.ax = None # To hold the main axis
 
         self.plot_stock_data(candidate)
 
     def plot_stock_data(self, candidate: ReboundCandidate):
         """Uses the pre-calculated data stored in the candidate to plot the chart."""
         try:
-            # Use the DataFrame that was stored during the scan to ensure 100% consistency
             data = candidate.history_df
             if data is None or data.empty:
                 QMessageBox.warning(self, "Data Error", f"Historical data for {candidate.ticker} was not found in the candidate object.")
                 return
 
-            # Slicing by tail is more robust than by date range.
-            num_days = config.CHART_HISTORY_MONTHS * 22 # Approx. 22 trading days per month
-            plot_data = data.tail(num_days)
+            # Let mplfinance handle the date range. It defaults to a reasonable amount.
+            plot_data = data
 
-            # --- Plotting ---
+            # --- mplfinance native plotting ---
+
+            # 1. Define additional plots (SMAs, RSI)
+            add_plots = []
+            if 'SMA50' in plot_data.columns and not plot_data['SMA50'].empty:
+                add_plots.append(mpf.make_addplot(plot_data['SMA50'], color='green', width=0.7))
+            if 'SMA200' in plot_data.columns and not plot_data['SMA200'].empty:
+                add_plots.append(mpf.make_addplot(plot_data['SMA200'], color='blue', width=0.7))
+            if 'RSI' in plot_data.columns and not plot_data['RSI'].empty:
+                # Panel 2 is the third panel (0=price, 1=volume)
+                add_plots.append(mpf.make_addplot(plot_data['RSI'], panel=2, color='orange', ylabel='RSI'))
+
+            # 2. Clear the existing figure and let mplfinance create its own axes
             fig = self.canvas.figure
             fig.clf()
 
-            # Create axes for candlestick, volume, and RSI using a more robust method
-            (self.ax, ax_vol, ax_rsi) = fig.subplots(3, 1, sharex=True,
-                                                     height_ratios=[3, 1, 1],
-                                                     gridspec_kw={'hspace': 0.05})
-            fig.subplots_adjust(hspace=0)
-
-            self.ax.set_ylabel('Price')
-            ax_vol.set_ylabel('Volume')
-            ax_rsi.set_ylabel('RSI')
-
-            # Remove x-axis labels from the main and volume plots for a cleaner look
-            self.ax.tick_params(axis='x', labelbottom=False)
-            ax_vol.tick_params(axis='x', labelbottom=False)
-
-            # --- Dynamic Overlays ---
-            add_plots = []
-            if candidate.scenario == "Quality Stock Pullback":
-                support_level = candidate.technicals.get('50_sma_value')
-                if support_level:
-                    self.ax.axhline(y=support_level, color='green', linestyle='--', label='50-Day SMA Support')
-
-            if 'SMA50' in plot_data.columns and not plot_data['SMA50'].empty:
-                add_plots.append(mpf.make_addplot(plot_data['SMA50'], ax=self.ax, color='green', width=0.7))
-            if 'SMA200' in plot_data.columns and not plot_data['SMA200'].empty:
-                add_plots.append(mpf.make_addplot(plot_data['SMA200'], ax=self.ax, color='blue', width=0.7))
-
-            self.ax.set_title(f'{candidate.ticker} - {candidate.scenario}')
-
-            # --- DEBUGGING: Log the data just before plotting ---
-            logging.info("--- Chart Data Debug ---")
-            logging.info(f"Data shape passed to plot: {plot_data.shape}")
-            logging.info(f"Data index type: {type(plot_data.index)}")
-            logging.info("Data Head:\n" + plot_data.head().to_string())
-            logging.info("Data Tail:\n" + plot_data.tail().to_string())
-            logging.info("--- End Chart Data Debug ---")
-
-            # Main candle plot
-            mpf.plot(plot_data, type='candle', ax=self.ax, volume=ax_vol, addplot=add_plots, style='yahoo')
-
-            # RSI Plot
-            if 'RSI' in plot_data.columns and not plot_data['RSI'].empty:
-                ax_rsi.plot(plot_data.index, plot_data['RSI'], color='orange')
-            ax_rsi.axhline(70, color='red', linestyle='--', linewidth=0.5)
-            ax_rsi.axhline(30, color='green', linestyle='--', linewidth=0.5)
-            ax_rsi.set_ylim(0, 100)
-            ax_rsi.grid(True)
+            # 3. Plot the data
+            axes = mpf.plot(plot_data,
+                          type='candle',
+                          style='yahoo',
+                          title=f'{candidate.ticker} - {candidate.scenario}',
+                          volume=True,
+                          addplot=add_plots,
+                          panel_ratios=(3, 1, 1),
+                          fig=fig,
+                          returnfig=True # Important: returns the figure and axes
+                         )
 
             # --- Information Box ---
+            main_ax = axes[0]
             eps_growth = candidate.fundamentals.get('earningsGrowth')
             eps_growth_str = f"{eps_growth * 100:.2f}%" if eps_growth is not None else "N/A"
-
             rev_growth = candidate.fundamentals.get('revenueGrowth')
             rev_growth_str = f"{rev_growth * 100:.2f}%" if rev_growth is not None else "N/A"
-
             price = candidate.technicals.get('price')
             price_str = f"${price:.2f}" if price is not None else "N/A"
-
             rsi = candidate.technicals.get('rsi')
             rsi_str = f"{rsi:.1f}" if rsi is not None else "N/A"
-
             info_text = (
                 f"Scenario: {candidate.scenario}\n"
                 f"Price: {price_str}\n"
@@ -244,13 +215,8 @@ class ChartWindow(QWidget):
                 f"EPS Growth: {eps_growth_str}\n"
                 f"Revenue Growth: {rev_growth_str}"
             )
-            self.ax.text(0.02, 0.98, info_text, transform=self.ax.transAxes, fontsize=9,
-                        verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5))
-
-            # Only show legend if there are labeled items
-            handles, labels = self.ax.get_legend_handles_labels()
-            if handles:
-                self.ax.legend(handles, labels)
+            main_ax.text(0.02, 0.98, info_text, transform=main_ax.transAxes, fontsize=9,
+                         verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5))
 
             self.canvas.draw()
         except Exception as e:
