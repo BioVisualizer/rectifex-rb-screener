@@ -6,7 +6,8 @@ from unittest.mock import patch, MagicMock
 
 # We need a QApplication instance for some Qt internals to work
 from PyQt6.QtWidgets import QApplication
-app = QApplication.instance() or QApplication(sys.argv)
+# Pass '-platform offscreen' to run in a headless environment, avoiding display server issues.
+app = QApplication.instance() or QApplication(['-platform', 'offscreen'])
 
 # Now we can import our application code
 from ui import ChartWindow

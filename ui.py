@@ -8,18 +8,15 @@ import shutil
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableView, QStatusBar, QFileDialog, QMessageBox, QHeaderView,
-    QProgressBar, QComboBox
+    QProgressBar, QComboBox, QLabel
 )
 from PyQt6.QtCore import (
     QObject, QThread, pyqtSignal, QAbstractTableModel, Qt, QSortFilterProxyModel
 )
-from PyQt6.QtGui import QColor, QIcon
+from PyQt6.QtGui import QColor, QIcon, QPixmap
 
 # For charting
-import matplotlib
-matplotlib.use('QtAgg')
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
 import mplfinance as mpf
 
 # App-specific imports
@@ -150,27 +147,30 @@ class ChartWindow(QWidget):
         super().__init__()
         self.candidate = candidate
         self.setWindowTitle(f"Chart for {self.candidate.ticker} - {config.APP_NAME}")
-        self.setGeometry(150, 150, 800, 600)
+        self.setGeometry(150, 150, 850, 650) # Adjusted size for better viewing
 
         layout = QVBoxLayout()
         self.setLayout(layout)
-        self.canvas = FigureCanvas(Figure(figsize=(8, 6)))
-        layout.addWidget(self.canvas)
+
+        # Use a QLabel to display the chart as a static image
+        self.image_label = QLabel("Generating chart...")
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.image_label)
 
         self.plot_stock_data(candidate)
 
     def plot_stock_data(self, candidate: ReboundCandidate):
-        """Uses the pre-calculated data stored in the candidate to plot the chart."""
+        """
+        Generates the stock chart as a static image file and displays it.
+        This approach avoids GUI backend compatibility issues with mplfinance.
+        """
         try:
             data = candidate.history_df
             if data is None or data.empty:
-                QMessageBox.warning(self, "Data Error", f"Historical data for {candidate.ticker} was not found in the candidate object.")
+                self.image_label.setText(f"Historical data for {candidate.ticker} not found.")
                 return
 
-            # Let mplfinance handle the date range. It defaults to a reasonable amount.
             plot_data = data
-
-            # --- mplfinance native plotting ---
 
             # 1. Define additional plots (SMAs, RSI)
             add_plots = []
@@ -179,30 +179,21 @@ class ChartWindow(QWidget):
             if 'SMA200' in plot_data.columns and not plot_data['SMA200'].empty:
                 add_plots.append(mpf.make_addplot(plot_data['SMA200'], color='blue', width=0.7))
             if 'RSI' in plot_data.columns and not plot_data['RSI'].empty:
-                # Panel 2 is the third panel (0=price, 1=volume)
                 add_plots.append(mpf.make_addplot(plot_data['RSI'], panel=2, color='orange', ylabel='RSI'))
 
-            # 2. Clear the existing figure and let mplfinance create its own axes
-            fig = self.canvas.figure
-            fig.clf()
-
-            # 3. Plot the data
-            # Pass the canvas's figure to mplfinance to plot on. This ensures mplfinance draws on our
-            # existing canvas instead of creating a new figure, and it resolves a crash related to
-            # incorrect object types being returned and unpacked.
+            # 2. Generate the plot and get the figure and axes objects back
             fig, axes = mpf.plot(plot_data,
-                          type='candle',
-                          style='yahoo',
-                          title=f'{candidate.ticker} - {candidate.scenario}',
-                          volume=True,
-                          addplot=add_plots,
-                          panel_ratios=(3, 1, 1),
-                          returnfig=True, # Important: returns the figure and axes
-                          fig=fig # Use the figure associated with the canvas
-                         )
+                                 type='candle',
+                                 style='yahoo',
+                                 title=f'{candidate.ticker} - {candidate.scenario}',
+                                 volume=True,
+                                 addplot=add_plots,
+                                 panel_ratios=(3, 1, 1),
+                                 returnfig=True, # Return the figure and axes to manipulate them
+                                 figsize=(10, 7) # Specify figure size for better resolution
+                                )
 
-            # --- Information Box ---
-            # axes[0] is the main chart panel as defined by mplfinance
+            # 3. Add the information box to the main axes
             main_ax = axes[0]
             eps_growth = candidate.fundamentals.get('earningsGrowth')
             eps_growth_str = f"{eps_growth * 100:.2f}%" if eps_growth is not None else "N/A"
@@ -212,20 +203,31 @@ class ChartWindow(QWidget):
             price_str = f"${price:.2f}" if price is not None else "N/A"
             rsi = candidate.technicals.get('rsi')
             rsi_str = f"{rsi:.1f}" if rsi is not None else "N/A"
-            info_text = (
-                f"Scenario: {candidate.scenario}\n"
-                f"Price: {price_str}\n"
-                f"RSI: {rsi_str}\n"
-                f"EPS Growth: {eps_growth_str}\n"
-                f"Revenue Growth: {rev_growth_str}"
-            )
+            info_text = (f"Scenario: {candidate.scenario}\n"
+                         f"Price: {price_str}\n"
+                         f"RSI: {rsi_str}\n"
+                         f"EPS Growth: {eps_growth_str}\n"
+                         f"Revenue Growth: {rev_growth_str}")
             main_ax.text(0.02, 0.98, info_text, transform=main_ax.transAxes, fontsize=9,
                          verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5))
 
-            self.canvas.draw()
+            # 4. Save the figure to a temporary file
+            chart_path = config.CACHE_DIR / f"{candidate.ticker}_chart.png"
+            chart_path.parent.mkdir(parents=True, exist_ok=True)
+            fig.savefig(chart_path, bbox_inches='tight')
+
+            # Explicitly close the figure to release memory
+            plt.close(fig)
+
+            # 5. Load the image into the QLabel
+            pixmap = QPixmap(str(chart_path))
+            self.image_label.setPixmap(pixmap)
+
         except Exception as e:
             logging.error(f"Failed to plot chart for {candidate.ticker}: {e}", exc_info=True)
-            QMessageBox.critical(self, "Chart Error", f"An unexpected error occurred while plotting the chart for {candidate.ticker}:\n\n{e}")
+            error_message = f"Could not generate chart for {candidate.ticker}:\n\n{e}"
+            self.image_label.setText(error_message)
+            QMessageBox.critical(self, "Chart Error", error_message)
 
 
 # --- Main Application Window ---
