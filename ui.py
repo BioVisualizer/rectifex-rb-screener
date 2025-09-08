@@ -187,7 +187,7 @@ class ChartWindow(QWidget):
             fig.clf()
 
             # 3. Plot the data
-            axes = mpf.plot(plot_data,
+            fig, axes = mpf.plot(plot_data,
                           type='candle',
                           style='yahoo',
                           title=f'{candidate.ticker} - {candidate.scenario}',
