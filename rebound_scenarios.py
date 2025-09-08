@@ -362,7 +362,6 @@ class ScenarioRunner:
                 stock_data = stock_info.get('stock_data')
                 if stock_data is None: continue
 
-                # Indicators are already calculated, just get the latest values
                 latest = stock_data.iloc[-1]
                 current_price = latest['Close']
                 sma50 = latest['SMA50']
