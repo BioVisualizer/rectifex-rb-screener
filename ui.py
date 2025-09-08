@@ -194,7 +194,6 @@ class ChartWindow(QWidget):
                           volume=True,
                           addplot=add_plots,
                           panel_ratios=(3, 1, 1),
-                          fig=fig,
                           returnfig=True # Important: returns the figure and axes
                          )
 
