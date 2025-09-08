@@ -63,10 +63,17 @@ async def run_verification():
             all_passed = False
             continue
 
+        # Verify scenario-specific data is present
+        if candidate.scenario == "Classic Oversold":
+            if candidate.technicals.get('rsi_score') is None or candidate.technicals.get('prox_score') is None:
+                print(f"    [FAIL] Classic Oversold candidate {candidate.ticker} is missing rsi_score or prox_score.")
+                all_passed = False
+                continue
+
         print("    [PASS] Candidate object is correctly structured.")
 
         with patch('PyQt6.QtWidgets.QWidget.show') as mock_show, \
-             patch('PyQt6.QtWidgets.QMessageBox.warning') as mock_warning:
+             patch('PyQt6.QtWidgets.QMessageBox.critical') as mock_critical:
             try:
                 chart_window = ChartWindow(candidate=candidate)
                 print("    [PASS] ChartWindow instantiated successfully.")

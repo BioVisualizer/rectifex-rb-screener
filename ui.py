@@ -81,9 +81,11 @@ class AnalysisWorker(QObject):
 
 class PandasModel(QAbstractTableModel):
     """A model to interface a pandas DataFrame with a QTableView."""
-    def __init__(self, data=pd.DataFrame(), parent=None):
+    # We also pass the raw candidate data to have access to full details for tooltips
+    def __init__(self, data=pd.DataFrame(), candidates_data=[], parent=None):
         super().__init__(parent)
         self._data = data
+        self.candidates_data = candidates_data
         self.numeric_columns = [
             'Score', 'RSI', 'Price', 'Dist_SMA(%)', 'Dist_Low(%)'
         ]
@@ -119,14 +121,16 @@ class PandasModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.ToolTipRole and column_name == "Score":
             base_tooltip = "Overall score (0-100) that rates the rebound potential. Higher is better."
 
-            # Check if the score breakdown columns exist for this row
-            if 'RSI_Score' in self._data.columns and 'Prox_Score' in self._data.columns:
-                rsi_score = self._data.iloc[row]["RSI_Score"]
-                prox_score = self._data.iloc[row]["Prox_Score"]
-                # Also check if they are not NaN or some other placeholder
-                if pd.notna(rsi_score) and pd.notna(prox_score):
-                    breakdown_tooltip = f"\n\nBreakdown ('Classic Oversold'):\n- RSI Score: {int(rsi_score)} / 60\n- Proximity Score: {int(prox_score)} / 40"
-                    return base_tooltip + breakdown_tooltip
+            # Get the full candidate data for this row to create a detailed tooltip
+            if row < len(self.candidates_data):
+                candidate = self.candidates_data[row]
+                # Only the 'Classic Oversold' scenario has this specific breakdown
+                if candidate.scenario == "Classic Oversold":
+                    rsi_score = candidate.technicals.get('rsi_score')
+                    prox_score = candidate.technicals.get('prox_score')
+                    if rsi_score is not None and prox_score is not None:
+                        breakdown_tooltip = f"\n\nBreakdown ('Classic Oversold'):\n- RSI Score: {int(rsi_score)} / 60\n- Proximity Score: {int(prox_score)} / 40"
+                        return base_tooltip + breakdown_tooltip
             return base_tooltip
 
         return None
@@ -410,7 +414,9 @@ class MainWindow(QMainWindow):
             return
 
         # Convert list of ReboundCandidate objects to a list of dicts for the DataFrame
-        results_list_of_dicts = []
+        # The main table will only show universally applicable columns.
+        # Scenario-specific details (like RSI/Prox scores) are in the tooltip.
+        display_results_list = []
         for r in results:
             res_dict = {
                 "Ticker": r.ticker,
@@ -418,16 +424,14 @@ class MainWindow(QMainWindow):
                 "Scenario": r.scenario,
                 "Score": r.score,
                 "Price": r.technicals.get('price', '-'),
-                # Add sub-scores for tooltip, using .get() to avoid KeyErrors for scenarios that don't have them
-                "RSI_Score": r.technicals.get('rsi_score'),
-                "Prox_Score": r.technicals.get('prox_score'),
             }
-            results_list_of_dicts.append(res_dict)
+            display_results_list.append(res_dict)
 
-        self.results_df = pd.DataFrame(results_list_of_dicts)
-        self.all_candidates_data = results # Keep the original objects for charting
+        self.results_df = pd.DataFrame(display_results_list)
+        # Keep the original full candidate objects for charting and for detailed tooltips
+        self.all_candidates_data = results
 
-        model = PandasModel(self.results_df)
+        model = PandasModel(self.results_df, self.all_candidates_data)
         proxy_model = QSortFilterProxyModel()
         proxy_model.setSourceModel(model)
         self.table_view.setModel(proxy_model)
