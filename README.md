@@ -20,20 +20,42 @@ The application is built with Python and PyQt6, and it is designed to be package
 
 ## Scanning Scenarios
 
-The application uses two main scenarios to find potential rebound candidates.
+The application uses seven different scenarios to find potential candidates, covering a range of technical and fundamental analysis strategies.
 
 ### Classic Oversold
-This scenario looks for technically oversold stocks that are near strong, long-term support levels. The criteria are:
-- **RSI (Relative Strength Index):** The stock's 14-day RSI must be below a certain threshold, indicating it may be oversold.
-- **Support Proximity:** The stock's current price must be close to a key support level, such as its 200-day simple moving average (SMA) or its 90-day low.
-- **Score:** The Rebound Score (0-100) for this scenario is weighted. About 60% of the score is based on how deeply oversold the RSI is, and about 40% is based on how close the price is to the support levels.
+This scenario looks for technically oversold stocks that are near strong, long-term support levels.
+- **Signal:** The stock's 14-day RSI is below an oversold threshold, and the current price is close to its 200-day moving average or 90-day low.
+- **Style:** Contrarian / Mean Reversion.
 
 ### Quality Stock Pullback
-This scenario looks for fundamentally strong companies that are in a healthy, long-term uptrend and have experienced a recent, minor price dip (a "pullback"). This is often seen as a potential buying opportunity.
-- **Uptrend:** The stock must be trading above its 200-day SMA, and its 50-day SMA must also be above the 200-day SMA, confirming a strong trend.
-- **Fundamental Strength:** The company must meet at least two of the following criteria: positive earnings growth, positive revenue growth, and a low debt-to-equity ratio.
-- **Pullback:** The stock's price must have recently pulled back to within a few percent of its 50-day SMA.
-- **Score:** The score for this scenario is weighted based on the quality of the fundamentals and the proximity of the price to the 50-day SMA support level.
+This scenario looks for fundamentally strong companies in a healthy, long-term uptrend that have experienced a recent, minor price dip.
+- **Signal:** The stock is in a confirmed uptrend (50-day SMA > 200-day SMA) and has pulled back to its 50-day SMA, while also meeting fundamental criteria for growth and financial health.
+- **Style:** Trend Following / Growth at a Reasonable Price (GARP).
+
+### Momentum Breakout
+This scenario identifies stocks hitting new 52-week highs on high trading volume.
+- **Signal:** The stock's price closes at or above its 52-week high, with volume significantly greater than its 30-day average.
+- **Style:** Momentum.
+
+### Golden Cross
+This scenario detects when a stock's 50-day moving average has recently crossed above its 200-day moving average.
+- **Signal:** A "Golden Cross" has occurred within the last 5 trading days, signaling a potential new long-term uptrend.
+- **Style:** Long-Term Trend Following.
+
+### Mean Reversion (Bollinger Bands)
+This scenario finds stocks trading at or below their lower Bollinger Band.
+- **Signal:** The stock's price touches or closes below the lower Bollinger Band, suggesting a statistically oversold condition that may revert to the mean.
+- **Style:** Short-Term Contrarian / Mean Reversion.
+
+### Volatility Squeeze
+This scenario flags stocks where price volatility has become unusually low.
+- **Signal:** The Bollinger Bandwidth (a measure of the distance between the upper and lower bands) is at or near its lowest point in the last six months. This often precedes a significant price move.
+- **Style:** Pre-Breakout / Volatility.
+
+### High-Quality Dividend
+This is a value-focused scan that looks for stocks with an attractive and sustainable dividend.
+- **Signal:** The stock has a dividend yield above a minimum threshold, a healthy payout ratio (not too high), and a low debt-to-equity ratio.
+- **Style:** Value / Income Investing.
 
 ## Installation and Usage (from Source)
 
