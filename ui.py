@@ -26,7 +26,7 @@ import data_loader
 from ticker_manager import TickerManagerDialog
 from data_structures import ReboundCandidate
 from fundamental_fetcher import FundamentalFetcher
-from rebound_scenarios import ScenarioRunner
+from rebound_scenarios import ScenarioRunner, calculate_rsi, calculate_sma
 
 # --- Worker Thread for Running Analysis ---
 
@@ -160,16 +160,25 @@ class ChartWindow(QWidget):
 
     def plot_stock_data(self, candidate: ReboundCandidate):
         """
-        Generates the stock chart as a static image file and displays it.
-        This approach avoids GUI backend compatibility issues with mplfinance.
+        Generates and displays a detailed stock chart for a given candidate.
+        This function now ensures all required indicators are calculated on-the-fly
+        to prevent crashes when charting candidates from different scenarios.
         """
         try:
-            data = candidate.history_df
-            if data is None or data.empty:
+            if candidate.history_df is None or candidate.history_df.empty:
                 self.image_label.setText(f"Historical data for {candidate.ticker} not found.")
                 return
 
-            plot_data = data
+            # Make a copy to avoid modifying the original DataFrame
+            plot_data = candidate.history_df.copy()
+
+            # --- Ensure all indicators for plotting are present ---
+            if 'SMA50' not in plot_data.columns:
+                plot_data['SMA50'] = calculate_sma(plot_data['Close'], 50)
+            if 'SMA200' not in plot_data.columns:
+                plot_data['SMA200'] = calculate_sma(plot_data['Close'], 200)
+            if 'RSI' not in plot_data.columns:
+                plot_data['RSI'] = calculate_rsi(plot_data['Close'])
 
             # 1. Define additional plots (SMAs, RSI)
             add_plots = []
@@ -177,19 +186,20 @@ class ChartWindow(QWidget):
                 add_plots.append(mpf.make_addplot(plot_data['SMA50'], color='green', width=0.7))
             if 'SMA200' in plot_data.columns and not plot_data['SMA200'].empty:
                 add_plots.append(mpf.make_addplot(plot_data['SMA200'], color='blue', width=0.7))
-            if 'RSI' in plot_data.columns and not plot_data['RSI'].empty:
-                add_plots.append(mpf.make_addplot(plot_data['RSI'], panel=2, color='orange', ylabel='RSI'))
 
-            # 2. Generate the plot and get the figure and axes objects back
+            # RSI is now guaranteed to be present, so we can always add it.
+            add_plots.append(mpf.make_addplot(plot_data['RSI'], panel=2, color='orange', ylabel='RSI'))
+
+            # 2. Generate the plot
             fig, axes = mpf.plot(plot_data,
                                  type='candle',
                                  style='yahoo',
                                  title=f'{candidate.ticker} - {candidate.scenario}',
                                  volume=True,
                                  addplot=add_plots,
-                                 panel_ratios=(3, 1, 1),
-                                 returnfig=True, # Return the figure and axes to manipulate them
-                                 figsize=(10, 7) # Specify figure size for better resolution
+                                 panel_ratios=(3, 1, 1), # This is now safe
+                                 returnfig=True,
+                                 figsize=(10, 7)
                                 )
 
             # 3. Add the information box to the main axes
@@ -200,8 +210,11 @@ class ChartWindow(QWidget):
             rev_growth_str = f"{rev_growth * 100:.2f}%" if rev_growth is not None else "N/A"
             price = candidate.technicals.get('price')
             price_str = f"${price:.2f}" if price is not None else "N/A"
-            rsi = candidate.technicals.get('rsi')
-            rsi_str = f"{rsi:.1f}" if rsi is not None else "N/A"
+
+            # Get RSI from the newly calculated data for the tooltip
+            rsi_val = plot_data['RSI'].iloc[-1]
+            rsi_str = f"{rsi_val:.1f}" if pd.notna(rsi_val) else "N/A"
+
             info_text = (f"Scenario: {candidate.scenario}\n"
                          f"Price: {price_str}\n"
                          f"RSI: {rsi_str}\n"
@@ -214,8 +227,6 @@ class ChartWindow(QWidget):
             chart_path = config.CACHE_DIR / f"{candidate.ticker}_chart.png"
             chart_path.parent.mkdir(parents=True, exist_ok=True)
             fig.savefig(chart_path, bbox_inches='tight')
-
-            # Explicitly close the figure to release memory
             plt.close(fig)
 
             # 5. Load the image into the QLabel
