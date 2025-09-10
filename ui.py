@@ -62,13 +62,8 @@ class AnalysisWorker(QObject):
                 is_cancelled_callback=lambda: self._is_cancelled
             )
 
-            results = []
-            if self.selected_scenario == "Classic Oversold":
-                results = runner.run_classic_oversold()
-            elif self.selected_scenario == "Quality Stock Pullback":
-                # Run the async function from this synchronous thread
-                results = asyncio.run(runner.run_quality_pullback())
-
+            # Run the selected scenario using the new generic method
+            results = asyncio.run(runner.run_scenario(self.selected_scenario))
             self.signals.result.emit(results)
         except Exception as e:
             import traceback
@@ -258,7 +253,8 @@ class MainWindow(QMainWindow):
         controls_layout = QHBoxLayout()
         self.scenarioComboBox = QComboBox()
         self.scenarioComboBox.setObjectName("scenarioComboBox")
-        self.scenarioComboBox.addItems(["Classic Oversold", "Quality Stock Pullback"])
+        # Populate scenarios dynamically from the ScenarioRunner
+        self.scenarioComboBox.addItems(ScenarioRunner.get_available_scenarios())
 
         self.scan_button = QPushButton("Start Scan")
         self.stop_scan_button = QPushButton("Stop Scan")
@@ -330,8 +326,13 @@ class MainWindow(QMainWindow):
         <p><b>Scanning Scenarios & Score</b></p>
         <p>The application uses different scenarios to find potential candidates:</p>
         <ul>
-            <li><b>Classic Oversold:</b> This scenario looks for technically oversold stocks that are near strong support levels (like the 200-day average or the 90-day low). The score (0-100) is primarily based on the RSI (Relative Strength Index) and proximity to these supports.</li>
-            <li><b>Quality Stock Pullback:</b> This scenario looks for fundamentally sound companies in a long-term uptrend that have recently experienced a small pullback towards their 50-day average. The score assesses the strength of the fundamental profile and the proximity to the 50-day average.</li>
+            <li><b>Classic Oversold:</b> Looks for technically oversold stocks (low RSI) near strong, long-term support levels (200-day average or 90-day low).</li>
+            <li><b>Quality Stock Pullback:</b> Finds fundamentally strong companies in a healthy uptrend that have experienced a minor price dip towards their 50-day average.</li>
+            <li><b>Momentum Breakout:</b> Identifies stocks hitting new 52-week highs on high trading volume, signaling strong upward momentum.</li>
+            <li><b>Golden Cross:</b> Detects when a stock's 50-day moving average has recently crossed above its 200-day average, a strong long-term bullish signal.</li>
+            <li><b>Mean Reversion (Bollinger Bands):</b> Finds stocks trading at or below their lower Bollinger Band, suggesting a statistically oversold condition and a potential rebound.</li>
+            <li><b>Volatility Squeeze:</b> Flags stocks where price volatility has become unusually low (narrow Bollinger Bands), which often precedes a large price move.</li>
+            <li><b>High-Quality Dividend:</b> A value-focused scan that looks for stocks with an attractive dividend yield, but filters for sustainability (payout ratio) and financial health (low debt).</li>
         </ul>
         <p><b>Column Explanations:</b></p>
         <ul>

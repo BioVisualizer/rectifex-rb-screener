@@ -68,7 +68,8 @@ class FundamentalFetcher:
                 'revenueGrowth': info.get('revenueGrowth'),
                 'debtToEquity': info.get('debtToEquity'),
                 'earningsGrowth': info.get('earningsGrowth'),
-                # Add other fields as needed
+                'dividendYield': info.get('dividendYield'),
+                'payoutRatio': info.get('payoutRatio'),
             }
             return required_fields
 
