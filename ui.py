@@ -143,6 +143,39 @@ class PandasModel(QAbstractTableModel):
         return self._data
 
 
+class CustomSortProxyModel(QSortFilterProxyModel):
+    """
+    A custom proxy model to handle numerical sorting for specific columns.
+    """
+    def lessThan(self, left, right):
+        """
+        Custom sorting logic. It performs numerical comparison for the 'Score'
+        column and falls back to default string comparison for all others.
+        """
+        col = self.sortColumn()
+        source_model = self.sourceModel()
+
+        # Ensure the column index is valid for the source model's dataframe
+        if col >= len(source_model.get_dataframe().columns):
+            return super().lessThan(left, right)
+
+        column_name = source_model.get_dataframe().columns[col]
+
+        if column_name == "Score":
+            left_data = source_model.data(left, Qt.ItemDataRole.EditRole)
+            right_data = source_model.data(right, Qt.ItemDataRole.EditRole)
+
+            try:
+                # Perform numerical comparison
+                return float(left_data) < float(right_data)
+            except (ValueError, TypeError):
+                # Fallback for any non-numeric data
+                return str(left_data) < str(right_data)
+
+        # Default behavior for all other columns
+        return super().lessThan(left, right)
+
+
 # --- Charting Window ---
 class ChartWindow(QWidget):
     """A separate window for displaying a detailed stock chart for a given candidate."""
@@ -448,10 +481,9 @@ class MainWindow(QMainWindow):
         self.all_candidates_data = results
 
         model = PandasModel(self.results_df, self.all_candidates_data)
-        proxy_model = QSortFilterProxyModel()
+        # Use the custom proxy model for robust sorting
+        proxy_model = CustomSortProxyModel()
         proxy_model.setSourceModel(model)
-        # Explicitly set the role used for sorting to ensure numerical sorting
-        proxy_model.setSortRole(Qt.ItemDataRole.EditRole)
         self.table_view.setModel(proxy_model)
         self.table_view.resizeColumnsToContents()
         self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
