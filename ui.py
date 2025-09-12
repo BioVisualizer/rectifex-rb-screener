@@ -450,6 +450,8 @@ class MainWindow(QMainWindow):
         model = PandasModel(self.results_df, self.all_candidates_data)
         proxy_model = QSortFilterProxyModel()
         proxy_model.setSourceModel(model)
+        # Explicitly set the role used for sorting to ensure numerical sorting
+        proxy_model.setSortRole(Qt.ItemDataRole.EditRole)
         self.table_view.setModel(proxy_model)
         self.table_view.resizeColumnsToContents()
         self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
