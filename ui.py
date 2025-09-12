@@ -102,6 +102,10 @@ class PandasModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.DisplayRole:
             return str(self._data.iloc[row, col])
 
+        # Return raw data for sorting role
+        if role == Qt.ItemDataRole.EditRole:
+            return self._data.iloc[row, col]
+
         if role == Qt.ItemDataRole.TextAlignmentRole:
             if column_name in self.numeric_columns:
                 return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
