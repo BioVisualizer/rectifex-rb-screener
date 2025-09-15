@@ -103,7 +103,7 @@ class FundamentalFetcher:
         is_cancelled = is_cancelled_callback if is_cancelled_callback else lambda: False
         results = {}
         tickers_to_fetch = []
-        semaphore = asyncio.Semaphore(10)  # Limit to 10 concurrent requests
+        semaphore = asyncio.Semaphore(2)  # Limit to 2 concurrent requests to be less aggressive
 
         # First, check cache for all tickers
         for ticker in tickers:
