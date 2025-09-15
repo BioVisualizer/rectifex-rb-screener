@@ -6,6 +6,7 @@ import numpy as np
 import logging
 from typing import List, Dict, Any, Callable
 import json
+import re
 from datetime import datetime, timedelta
 import yfinance as yf
 from abc import ABC, abstractmethod
@@ -47,26 +48,6 @@ def calculate_bollinger_bands(data: pd.Series, window: int = 20, num_std_dev: in
     lower_band = middle_band - (std_dev * num_std_dev)
 
     return upper_band, middle_band, lower_band
-
-def calculate_macd(data: pd.Series, fast_period: int = 12, slow_period: int = 26, signal_period: int = 9) -> tuple[pd.Series, pd.Series, pd.Series]:
-    """
-    Calculates the Moving Average Convergence Divergence (MACD).
-
-    Returns a tuple containing:
-    - MACD line (fast_ema - slow_ema)
-    - Signal line (9-period EMA of MACD line)
-    - MACD Histogram (MACD line - Signal line)
-    """
-    if data is None or len(data) < slow_period:
-        return pd.Series(dtype=np.float64), pd.Series(dtype=np.float64), pd.Series(dtype=np.float64)
-
-    fast_ema = data.ewm(span=fast_period, adjust=False).mean()
-    slow_ema = data.ewm(span=slow_period, adjust=False).mean()
-    macd_line = fast_ema - slow_ema
-    signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
-    histogram = macd_line - signal_line
-
-    return macd_line, signal_line, histogram
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -241,33 +222,29 @@ class ClassicOversoldScenario(BaseScenario):
             if self.is_cancelled():
                 break
             self._emit_progress(f"--- Processing Market: {market} ---")
+            index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
+            if not index_ticker:
+                self._emit_progress(f"No index ticker for market '{market}'. Skipping.")
+                processed_tickers += len(tickers)
+                continue
 
-            # For custom lists, we bypass the market context filter.
-            if market != 'CUSTOM':
-                index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
-                if not index_ticker:
-                    self._emit_progress(f"No index ticker for market '{market}'. Skipping.")
-                    processed_tickers += len(tickers)
-                    continue
+            if index_ticker not in index_data_cache:
+                index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
+                market_context_ok[market] = passes_market_context_filter(index_data_cache[index_ticker])
 
-                if index_ticker not in index_data_cache:
-                    index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
-                    market_context_ok[market] = passes_market_context_filter(index_data_cache[index_ticker])
+            if not market_context_ok.get(market, False):
+                self._emit_progress(f"Market context for {market} is bearish. Skipping tickers.")
+                processed_tickers += len(tickers)
+                continue
 
-                if not market_context_ok.get(market, False):
-                    self._emit_progress(f"Market context for {market} is bearish. Skipping tickers.")
-                    processed_tickers += len(tickers)
-                    continue
-                self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
-            else:
-                self._emit_progress(f"Processing custom ticker list. Analyzing {len(tickers)} tickers.")
+            self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
             for ticker in tickers:
                 if self.is_cancelled():
                     self._emit_progress("Scan cancelled by user.")
                     break
                 processed_tickers += 1
                 self._emit_percent(int((processed_tickers / total_tickers) * 100))
-                self._emit_progress(f"Analyzing [{processed_tickers}/{total_tickers}] {ticker}")
+                self._emit_progress(f"Scanning {market}: Analyzing {ticker} ({processed_tickers}/{total_tickers})")
 
                 stock_info = get_ticker_info_cached(ticker)
                 if not passes_liquidity_filter(stock_info):
@@ -344,25 +321,21 @@ class MeanReversionScenario(BaseScenario):
         for market, tickers in all_tickers.items():
             if self.is_cancelled(): break
             self._emit_progress(f"--- Processing Market: {market} ---")
+            index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
+            if not index_ticker:
+                processed_tickers += len(tickers)
+                continue
 
-            # For custom lists, we bypass the market context filter.
-            if market != 'CUSTOM':
-                index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
-                if not index_ticker:
-                    processed_tickers += len(tickers)
-                    continue
+            if index_ticker not in index_data_cache:
+                index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
+                market_context_ok[market] = passes_market_context_filter(index_data_cache[index_ticker])
 
-                if index_ticker not in index_data_cache:
-                    index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
-                    market_context_ok[market] = passes_market_context_filter(index_data_cache[index_ticker])
+            if not market_context_ok.get(market, False):
+                self._emit_progress(f"Market context for {market} is bearish. Skipping tickers.")
+                processed_tickers += len(tickers)
+                continue
 
-                if not market_context_ok.get(market, False):
-                    self._emit_progress(f"Market context for {market} is bearish. Skipping tickers.")
-                    processed_tickers += len(tickers)
-                    continue
-                self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
-            else:
-                self._emit_progress(f"Processing custom ticker list. Analyzing {len(tickers)} tickers.")
+            self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
             for ticker in tickers:
                 if self.is_cancelled(): break
                 processed_tickers += 1
@@ -545,25 +518,21 @@ class MomentumBreakoutScenario(BaseScenario):
         for market, tickers in all_tickers.items():
             if self.is_cancelled(): break
             self._emit_progress(f"--- Processing Market: {market} ---")
+            index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
+            if not index_ticker:
+                processed_tickers += len(tickers)
+                continue
 
-            # For custom lists, we bypass the market context filter.
-            if market != 'CUSTOM':
-                index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
-                if not index_ticker:
-                    processed_tickers += len(tickers)
-                    continue
+            if index_ticker not in index_data_cache:
+                index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
+                market_context_ok[market] = passes_market_context_filter(index_data_cache[index_ticker])
 
-                if index_ticker not in index_data_cache:
-                    index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
-                    market_context_ok[market] = passes_market_context_filter(index_data_cache[index_ticker])
+            if not market_context_ok.get(market, False):
+                self._emit_progress(f"Market context for {market} is bearish. Skipping breakouts.")
+                processed_tickers += len(tickers)
+                continue
 
-                if not market_context_ok.get(market, False):
-                    self._emit_progress(f"Market context for {market} is bearish. Skipping breakouts.")
-                    processed_tickers += len(tickers)
-                    continue
-                self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
-            else:
-                self._emit_progress(f"Processing custom ticker list. Analyzing {len(tickers)} tickers.")
+            self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
             for ticker in tickers:
                 if self.is_cancelled(): break
                 processed_tickers += 1
@@ -652,25 +621,21 @@ class GoldenCrossScenario(BaseScenario):
         for market, tickers in all_tickers.items():
             if self.is_cancelled(): break
             self._emit_progress(f"--- Processing Market: {market} ---")
+            index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
+            if not index_ticker:
+                processed_tickers += len(tickers)
+                continue
 
-            # For custom lists, we bypass the market context filter.
-            if market != 'CUSTOM':
-                index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
-                if not index_ticker:
-                    processed_tickers += len(tickers)
-                    continue
+            if index_ticker not in index_data_cache:
+                index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
+                market_context_ok[market] = passes_market_context_filter(index_data_cache[index_ticker])
 
-                if index_ticker not in index_data_cache:
-                    index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
-                    market_context_ok[market] = passes_market_context_filter(index_data_cache[index_ticker])
+            if not market_context_ok.get(market, False):
+                self._emit_progress(f"Market context for {market} is bearish. Skipping tickers.")
+                processed_tickers += len(tickers)
+                continue
 
-                if not market_context_ok.get(market, False):
-                    self._emit_progress(f"Market context for {market} is bearish. Skipping tickers.")
-                    processed_tickers += len(tickers)
-                    continue
-                self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
-            else:
-                self._emit_progress(f"Processing custom ticker list. Analyzing {len(tickers)} tickers.")
+            self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
             for ticker in tickers:
                 if self.is_cancelled(): break
                 processed_tickers += 1
@@ -837,46 +802,43 @@ class QualityPullbackScenario(BaseScenario):
         self._emit_progress(f"Starting '{self.name}' scan...")
         all_tickers_by_market = data_loader.get_all_tickers()
         all_candidates = []
-        total_tickers = sum(len(t) for t in all_tickers_by_market.values())
-        processed_tickers = 0
 
         index_data_cache = {}
         market_context_ok = {}
         ticker_info_cache = {}
+
+        # This scenario is complex, so we estimate progress allocation
+        # Phase 1 (Tech Filter): 40%
+        # Phase 2 (Fund. Fetch): 50%
+        # Phase 3 (Final Check): 10%
 
         for market, tickers in all_tickers_by_market.items():
             if self.is_cancelled():
                 break
             self._emit_progress(f"--- Processing Market: {market} ---")
 
-            # For custom lists, we bypass the market context filter.
             if market != 'CUSTOM':
                 index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
                 if not index_ticker:
                     self._emit_progress(f"No index ticker for market '{market}'. Skipping.")
-                    processed_tickers += len(tickers)
                     continue
-
                 if index_ticker not in index_data_cache:
                     index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
                     market_context_ok[market] = passes_market_context_filter(index_data_cache[index_ticker])
-
                 if not market_context_ok.get(market, False):
                     self._emit_progress(f"Market context for {market} is bearish. Skipping tickers.")
-                    processed_tickers += len(tickers)
                     continue
-                self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
-            else:
-                self._emit_progress(f"Processing custom ticker list. Analyzing {len(tickers)} tickers.")
 
+            # --- Phase 1: Technical Filtering ---
             technically_strong_tickers = []
-            for ticker in tickers:
-                if self.is_cancelled():
-                    self._emit_progress("Scan cancelled by user.")
-                    break
-                processed_tickers += 1
-                self._emit_percent(int((processed_tickers / total_tickers) * 50))
-                self._emit_progress(f"[{processed_tickers}/{total_tickers}] Tech Filter: {ticker}")
+            self._emit_progress("Phase 1/3: Applying technical filters...")
+            total_tickers_in_market = len(tickers)
+            for i, ticker in enumerate(tickers):
+                if self.is_cancelled(): break
+
+                progress_pct = int(((i + 1) / total_tickers_in_market) * 40)
+                self._emit_percent(progress_pct)
+                self._emit_progress(f"Phase 1/3: Tech Filter ({i+1}/{total_tickers_in_market}) - {ticker}")
 
                 stock_info = get_ticker_info_cached(ticker)
                 if not passes_liquidity_filter(stock_info):
@@ -899,13 +861,20 @@ class QualityPullbackScenario(BaseScenario):
                 self._emit_progress("No technically strong tickers found in this market.")
                 continue
 
-            self._emit_progress(f"Fetching fundamental data for {len(technically_strong_tickers)} strong tickers...")
-            if self.is_cancelled():
-                return all_candidates
+            # --- Phase 2: Fundamental Data Fetching ---
+            def fundamental_progress_callback(message: str):
+                self._emit_progress(f"Phase 2/3: {message}")
+                match = re.search(r'\((\d+)/(\d+)\)', message)
+                if match:
+                    current, total = int(match.group(1)), int(match.group(2))
+                    progress_pct = 40 + int((current / total) * 50)
+                    self._emit_percent(progress_pct)
+
+            if self.is_cancelled(): break
 
             fundamental_data = await self.fetcher.get_fundamentals_for_tickers(
                 technically_strong_tickers,
-                progress_callback=self._emit_progress,
+                progress_callback=fundamental_progress_callback,
                 is_cancelled_callback=self.is_cancelled
             )
 
@@ -914,17 +883,11 @@ class QualityPullbackScenario(BaseScenario):
                 if data:
                     score = 0
                     eps_growth = data.get('earningsGrowth')
-                    if eps_growth is not None and eps_growth > 0.10:
-                        score += 1
-
+                    if eps_growth is not None and eps_growth > 0.10: score += 1
                     rev_growth = data.get('revenueGrowth')
-                    if rev_growth is not None and rev_growth > 0.05:
-                        score += 1
-
+                    if rev_growth is not None and rev_growth > 0.05: score += 1
                     debt_to_equity = data.get('debtToEquity')
-                    if debt_to_equity is not None and debt_to_equity < 0.7:
-                        score += 1
-
+                    if debt_to_equity is not None and debt_to_equity < 0.7: score += 1
                     if score >= 2:
                         fundamentally_strong_tickers[ticker] = data
 
@@ -932,11 +895,14 @@ class QualityPullbackScenario(BaseScenario):
                 self._emit_progress("No fundamentally strong tickers found in this market.")
                 continue
 
-            self._emit_progress(f"Final check for {len(fundamentally_strong_tickers)} tickers...")
+            # --- Phase 3: Final Analysis ---
+            self._emit_progress(f"Phase 3/3: Final analysis of {len(fundamentally_strong_tickers)} tickers...")
+            total_final_tickers = len(fundamentally_strong_tickers)
             for i, (ticker, fund_data) in enumerate(fundamentally_strong_tickers.items()):
-                if self.is_cancelled():
-                    break
-                self._emit_percent(50 + int(((i + 1) / len(fundamentally_strong_tickers)) * 50))
+                if self.is_cancelled(): break
+
+                progress_pct = 90 + int(((i + 1) / total_final_tickers) * 10)
+                self._emit_percent(progress_pct)
 
                 stock_data = ticker_info_cache.get(ticker, {}).get('stock_data')
                 if stock_data is None: continue
@@ -951,9 +917,7 @@ class QualityPullbackScenario(BaseScenario):
                         prox_score = 100 - (dist_to_sma50 / 3.0 * 100)
                         fund_strength = (fund_data.get('earningsGrowth', 0) * 100)
                         score = int(0.7 * prox_score + 0.3 * fund_strength)
-
                         fund_data['name'] = ticker_info_cache.get(ticker, {}).get('shortName', 'N/A')
-
                         candidate = ReboundCandidate(
                             ticker=ticker, scenario=self.name, score=min(100, score),
                             history_df=stock_data,
@@ -968,6 +932,7 @@ class QualityPullbackScenario(BaseScenario):
                         all_candidates.append(candidate)
 
         self._emit_progress(f"Scan complete. Found {len(all_candidates)} candidates.")
+        self._emit_percent(100)
         return all_candidates
 
 

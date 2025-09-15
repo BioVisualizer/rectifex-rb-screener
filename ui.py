@@ -240,9 +240,9 @@ class ChartWindow(QWidget):
     def plot_stock_data(self, candidate: ReboundCandidate):
         """
         Generates and displays a detailed stock chart on the embedded canvas.
+        This version plots indicators manually to work with an embedded canvas.
         """
         try:
-            # Clear previous figure content before drawing a new plot
             self.figure.clear()
 
             if candidate.history_df is None or candidate.history_df.empty:
@@ -254,7 +254,7 @@ class ChartWindow(QWidget):
 
             plot_data = candidate.history_df.copy()
 
-            # --- Ensure all indicators for plotting are present ---
+            # --- Indicator Calculations ---
             if 'SMA50' not in plot_data.columns:
                 plot_data['SMA50'] = calculate_sma(plot_data['Close'], 50)
             if 'SMA200' not in plot_data.columns:
@@ -264,18 +264,8 @@ class ChartWindow(QWidget):
 
             macd_line, signal_line, macd_hist = calculate_macd(plot_data['Close'])
 
-            # --- Create addplots ---
-            add_plots = [
-                mpf.make_addplot(plot_data['SMA50'], color='blue', width=0.7),
-                mpf.make_addplot(plot_data['SMA200'], color='orange', width=0.7),
-                mpf.make_addplot(plot_data['RSI'], panel=2, color='purple', ylabel='RSI', width=0.8),
-                mpf.make_addplot(macd_hist, type='bar', panel=3, color='grey', alpha=0.5, ylabel='MACD'),
-                mpf.make_addplot(macd_line, panel=3, color='blue', width=0.7),
-                mpf.make_addplot(signal_line, panel=3, color='red', width=0.7)
-            ]
-
-            # --- Manually create axes to plot on our existing Figure ---
-            gs = self.figure.add_gridspec(4, 1, height_ratios=[6, 1, 2, 2])
+            # --- Axes Creation ---
+            gs = self.figure.add_gridspec(4, 1, height_ratios=[6, 1, 2, 2], hspace=0.05)
             price_ax = self.figure.add_subplot(gs[0, 0])
             volume_ax = self.figure.add_subplot(gs[1, 0], sharex=price_ax)
             rsi_ax = self.figure.add_subplot(gs[2, 0], sharex=price_ax)
@@ -286,22 +276,35 @@ class ChartWindow(QWidget):
             volume_ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
             rsi_ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
 
-            # --- Plot data using mplfinance on the created axes ---
+            # --- Plotting with mplfinance (Primary) ---
             mpf.plot(plot_data,
                      type='candle',
                      ax=price_ax,
                      volume=volume_ax,
-                     addplot=add_plots,
-                     style='yahoo', # The style will be applied to the axes
-                     xrotation=20
-                    )
+                     style='yahoo',
+                     xrotation=20)
 
-            # --- Post-processing on axes ---
+            # --- Manual Plotting of Indicators (Secondary) ---
+            price_ax.plot(plot_data.index, plot_data['SMA50'], color='blue', linewidth=0.7, label='SMA50')
+            price_ax.plot(plot_data.index, plot_data['SMA200'], color='orange', linewidth=0.7, label='SMA200')
+
+            rsi_ax.plot(plot_data.index, plot_data['RSI'], color='purple', linewidth=0.8, label='RSI')
+
+            macd_ax.bar(plot_data.index, macd_hist, color='grey', alpha=0.5, width=1, label='Histogram')
+            macd_ax.plot(plot_data.index, macd_line, color='blue', linewidth=0.7, label='MACD')
+            macd_ax.plot(plot_data.index, signal_line, color='red', linewidth=0.7, label='Signal')
+
+            # --- Styling and Labels ---
             self.figure.suptitle(f'{candidate.ticker} - {candidate.scenario}', y=0.98)
+            price_ax.legend()
+            rsi_ax.set_ylabel('RSI')
+            macd_ax.set_ylabel('MACD')
 
             rsi_ax.axhline(70, color='red', linestyle='--', linewidth=0.7, alpha=0.8)
             rsi_ax.axhline(30, color='green', linestyle='--', linewidth=0.7, alpha=0.8)
+            rsi_ax.set_ylim(0, 100) # Fix RSI y-axis scale
 
+            # Add info text box
             eps_growth = candidate.fundamentals.get('earningsGrowth')
             eps_growth_str = f"{eps_growth * 100:.2f}%" if eps_growth is not None else "N/A"
             rev_growth = candidate.fundamentals.get('revenueGrowth')
@@ -316,7 +319,7 @@ class ChartWindow(QWidget):
             price_ax.text(0.02, 0.98, info_text, transform=price_ax.transAxes, fontsize=9,
                           verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5))
 
-            self.figure.tight_layout(rect=[0, 0, 1, 0.96]) # Adjust layout to make room for suptitle
+            self.figure.tight_layout(rect=[0, 0, 1, 0.96])
             self.canvas.draw()
 
         except Exception as e:
