@@ -13,10 +13,11 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import (
     QObject, QThread, pyqtSignal, QAbstractTableModel, Qt, QSortFilterProxyModel, QRegularExpression
 )
-from PyQt6.QtGui import QColor, QIcon, QPixmap
+from PyQt6.QtGui import QColor, QIcon
 
 # For charting
-import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 import mplfinance as mpf
 
 # App-specific imports
@@ -218,35 +219,39 @@ class CustomSortProxyModel(QSortFilterProxyModel):
 
 # --- Charting Window ---
 class ChartWindow(QWidget):
-    """A separate window for displaying a detailed stock chart for a given candidate."""
+    """A separate window for displaying a detailed, scalable stock chart."""
     def __init__(self, candidate: ReboundCandidate):
         super().__init__()
         self.candidate = candidate
         self.setWindowTitle(f"Chart for {self.candidate.ticker} - {config.APP_NAME}")
-        self.setGeometry(150, 150, 850, 650) # Adjusted size for better viewing
+        self.setGeometry(150, 150, 950, 750) # Start with a good default size
 
         layout = QVBoxLayout()
         self.setLayout(layout)
 
-        # Use a QLabel to display the chart as a static image
-        self.image_label = QLabel("Generating chart...")
-        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.image_label)
+        # Create a Matplotlib figure and a canvas widget
+        # The `facecolor` can be set to match the window's background
+        self.figure = Figure(figsize=(10, 8), facecolor=self.palette().window().color().name())
+        self.canvas = FigureCanvas(self.figure)
+        layout.addWidget(self.canvas)
 
         self.plot_stock_data(candidate)
 
     def plot_stock_data(self, candidate: ReboundCandidate):
         """
-        Generates and displays a detailed stock chart for a given candidate.
-        This function now ensures all required indicators are calculated on-the-fly
-        to prevent crashes when charting candidates from different scenarios.
+        Generates and displays a detailed stock chart on the embedded canvas.
         """
         try:
+            # Clear previous figure content before drawing a new plot
+            self.figure.clear()
+
             if candidate.history_df is None or candidate.history_df.empty:
-                self.image_label.setText(f"Historical data for {candidate.ticker} not found.")
+                ax = self.figure.add_subplot(111)
+                ax.text(0.5, 0.5, f"Historical data for {candidate.ticker} not found.",
+                        horizontalalignment='center', verticalalignment='center')
+                self.canvas.draw()
                 return
 
-            # Make a copy to avoid modifying the original DataFrame
             plot_data = candidate.history_df.copy()
 
             # --- Ensure all indicators for plotting are present ---
@@ -257,79 +262,71 @@ class ChartWindow(QWidget):
             if 'RSI' not in plot_data.columns:
                 plot_data['RSI'] = calculate_rsi(plot_data['Close'])
 
-            # Calculate MACD
             macd_line, signal_line, macd_hist = calculate_macd(plot_data['Close'])
 
-            # 1. Define additional plots (SMAs, RSI, MACD)
-            add_plots = []
-            if 'SMA50' in plot_data.columns and not plot_data['SMA50'].empty:
-                add_plots.append(mpf.make_addplot(plot_data['SMA50'], color='blue', width=0.7))
-            if 'SMA200' in plot_data.columns and not plot_data['SMA200'].empty:
-                add_plots.append(mpf.make_addplot(plot_data['SMA200'], color='orange', width=0.7))
+            # --- Create addplots ---
+            add_plots = [
+                mpf.make_addplot(plot_data['SMA50'], color='blue', width=0.7),
+                mpf.make_addplot(plot_data['SMA200'], color='orange', width=0.7),
+                mpf.make_addplot(plot_data['RSI'], panel=2, color='purple', ylabel='RSI', width=0.8),
+                mpf.make_addplot(macd_hist, type='bar', panel=3, color='grey', alpha=0.5, ylabel='MACD'),
+                mpf.make_addplot(macd_line, panel=3, color='blue', width=0.7),
+                mpf.make_addplot(signal_line, panel=3, color='red', width=0.7)
+            ]
 
-            # RSI plot with a distinct color and panel
-            add_plots.append(mpf.make_addplot(plot_data['RSI'], panel=2, color='purple', ylabel='RSI', width=0.8))
+            # --- Manually create axes to plot on our existing Figure ---
+            gs = self.figure.add_gridspec(4, 1, height_ratios=[6, 1, 2, 2])
+            price_ax = self.figure.add_subplot(gs[0, 0])
+            volume_ax = self.figure.add_subplot(gs[1, 0], sharex=price_ax)
+            rsi_ax = self.figure.add_subplot(gs[2, 0], sharex=price_ax)
+            macd_ax = self.figure.add_subplot(gs[3, 0], sharex=price_ax)
 
-            # MACD plots
-            add_plots.append(mpf.make_addplot(macd_hist, type='bar', panel=3, color='grey', alpha=0.5, ylabel='MACD'))
-            add_plots.append(mpf.make_addplot(macd_line, panel=3, color='blue', width=0.7))
-            add_plots.append(mpf.make_addplot(signal_line, panel=3, color='red', width=0.7))
+            # Hide tick labels on shared x-axes for a cleaner look
+            price_ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+            volume_ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+            rsi_ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
 
+            # --- Plot data using mplfinance on the created axes ---
+            mpf.plot(plot_data,
+                     type='candle',
+                     ax=price_ax,
+                     volume=volume_ax,
+                     addplot=add_plots,
+                     style='yahoo', # The style will be applied to the axes
+                     xrotation=20
+                    )
 
-            # 2. Generate the plot
-            fig, axes = mpf.plot(plot_data,
-                                 type='candle',
-                                 style='yahoo',
-                                 title=f'{candidate.ticker} - {candidate.scenario}',
-                                 volume=True,
-                                 addplot=add_plots,
-                                 panel_ratios=(6, 1, 2, 2), # Ratios for main, volume, rsi, macd
-                                 returnfig=True,
-                                 figsize=(10, 8) # Adjusted for the new panel
-                                )
+            # --- Post-processing on axes ---
+            self.figure.suptitle(f'{candidate.ticker} - {candidate.scenario}', y=0.98)
 
-            # 3. Add RSI horizontal lines for overbought/oversold
-            # axes are: [price_ax, date_ax, volume_ax, date_ax_vol, rsi_ax, date_ax_rsi, macd_ax, date_ax_macd]
-            rsi_ax = axes[4]
             rsi_ax.axhline(70, color='red', linestyle='--', linewidth=0.7, alpha=0.8)
             rsi_ax.axhline(30, color='green', linestyle='--', linewidth=0.7, alpha=0.8)
 
-            # 4. Add the information box to the main axes
-            main_ax = axes[0]
             eps_growth = candidate.fundamentals.get('earningsGrowth')
             eps_growth_str = f"{eps_growth * 100:.2f}%" if eps_growth is not None else "N/A"
             rev_growth = candidate.fundamentals.get('revenueGrowth')
             rev_growth_str = f"{rev_growth * 100:.2f}%" if rev_growth is not None else "N/A"
             price = candidate.technicals.get('price')
             price_str = f"${price:.2f}" if price is not None else "N/A"
-
-            # Get RSI from the newly calculated data for the tooltip
             rsi_val = plot_data['RSI'].iloc[-1]
             rsi_str = f"{rsi_val:.1f}" if pd.notna(rsi_val) else "N/A"
 
-            info_text = (f"Scenario: {candidate.scenario}\n"
-                         f"Price: {price_str}\n"
-                         f"RSI: {rsi_str}\n"
-                         f"EPS Growth: {eps_growth_str}\n"
-                         f"Revenue Growth: {rev_growth_str}")
-            main_ax.text(0.02, 0.98, info_text, transform=main_ax.transAxes, fontsize=9,
-                         verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5))
+            info_text = (f"Scenario: {candidate.scenario}\nPrice: {price_str}\nRSI: {rsi_str}\n"
+                         f"EPS Growth: {eps_growth_str}\nRev Growth: {rev_growth_str}")
+            price_ax.text(0.02, 0.98, info_text, transform=price_ax.transAxes, fontsize=9,
+                          verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5))
 
-            # 5. Save the figure to a temporary file
-            chart_path = config.CACHE_DIR / f"{candidate.ticker}_chart.png"
-            chart_path.parent.mkdir(parents=True, exist_ok=True)
-            fig.savefig(chart_path, bbox_inches='tight')
-            plt.close(fig)
-
-            # 6. Load the image into the QLabel
-            pixmap = QPixmap(str(chart_path))
-            self.image_label.setPixmap(pixmap)
+            self.figure.tight_layout(rect=[0, 0, 1, 0.96]) # Adjust layout to make room for suptitle
+            self.canvas.draw()
 
         except Exception as e:
             logging.error(f"Failed to plot chart for {candidate.ticker}: {e}", exc_info=True)
-            error_message = f"Could not generate chart for {candidate.ticker}:\n\n{e}"
-            self.image_label.setText(error_message)
-            QMessageBox.critical(self, "Chart Error", error_message)
+            self.figure.clear()
+            ax = self.figure.add_subplot(111)
+            ax.text(0.5, 0.5, f"Could not generate chart for {candidate.ticker}:\n\n{e}",
+                    horizontalalignment='center', verticalalignment='center', wrap=True)
+            self.canvas.draw()
+            QMessageBox.critical(self, "Chart Error", f"Could not generate chart for {candidate.ticker}:\n\n{e}")
 
 
 # --- Main Application Window ---
