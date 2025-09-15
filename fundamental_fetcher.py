@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Any, Callable
 import logging
+import random
+import time
 
 import yfinance as yf
 
@@ -50,41 +52,58 @@ class FundamentalFetcher:
     async def _fetch_single_ticker_data(self, ticker: str) -> Dict[str, Any] | None:
         """
         Fetches fundamental data for a single ticker using yfinance.
-        This runs the synchronous yfinance call in a separate thread.
+        This runs the synchronous yfinance call in a separate thread and
+        includes retry logic for transient errors.
         """
-        logging.info(f"Fetching fundamentals for {ticker} from yfinance.")
-        try:
-            # yf.Ticker is a synchronous call, so we run it in an executor
-            stock = await asyncio.to_thread(yf.Ticker, ticker)
-            info = await asyncio.to_thread(getattr, stock, 'info')
+        max_retries = 3
+        base_delay = 2  # seconds
 
-            if not info or info.get('marketCap') is None:
-                logging.warning(f"No valid fundamental info returned for {ticker}")
-                return None
+        for attempt in range(max_retries):
+            try:
+                logging.info(f"Fetching fundamentals for {ticker} from yfinance (Attempt {attempt + 1}/{max_retries}).")
+                stock = await asyncio.to_thread(yf.Ticker, ticker)
+                info = await asyncio.to_thread(getattr, stock, 'info')
 
-            # Extract only the required fields
-            required_fields = {
-                'trailingEps': info.get('trailingEps'),
-                'revenueGrowth': info.get('revenueGrowth'),
-                'debtToEquity': info.get('debtToEquity'),
-                'earningsGrowth': info.get('earningsGrowth'),
-                'dividendYield': info.get('dividendYield'),
-                'payoutRatio': info.get('payoutRatio'),
-            }
-            return required_fields
+                if not info or info.get('marketCap') is None:
+                    logging.warning(f"No valid fundamental info returned for {ticker}")
+                    return None
 
-        except Exception as e:
-            logging.warning(f"Could not download fundamental info for {ticker}: {e}")
-            return None
+                required_fields = {
+                    'trailingEps': info.get('trailingEps'),
+                    'revenueGrowth': info.get('revenueGrowth'),
+                    'debtToEquity': info.get('debtToEquity'),
+                    'earningsGrowth': info.get('earningsGrowth'),
+                    'dividendYield': info.get('dividendYield'),
+                    'payoutRatio': info.get('payoutRatio'),
+                }
+                return required_fields
+
+            except Exception as e:
+                error_msg = str(e)
+                # Only retry on "Too Many Requests" (429), not on "Unauthorized" (401)
+                if "429" in error_msg or "Too Many Requests" in error_msg:
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                        logging.warning(f"Rate limit error for {ticker}. Retrying in {delay:.2f} seconds...")
+                        await asyncio.sleep(delay)
+                    else:
+                        logging.error(f"Could not download fundamental info for {ticker} after {max_retries} attempts due to rate limiting: {e}")
+                        return None
+                else:
+                    # For other errors (401, invalid ticker, etc.), don't retry.
+                    logging.warning(f"Could not download fundamental info for {ticker} (non-retryable error): {e}")
+                    return None
+        return None
 
     async def get_fundamentals_for_tickers(self, tickers: List[str], progress_callback: Any = None, is_cancelled_callback: Callable = None) -> Dict[str, Dict]:
         """
         Asynchronously retrieves fundamental data for a list of tickers,
-        providing progress updates along the way.
+        using a semaphore to limit concurrency and avoid rate-limiting.
         """
         is_cancelled = is_cancelled_callback if is_cancelled_callback else lambda: False
         results = {}
         tickers_to_fetch = []
+        semaphore = asyncio.Semaphore(10)  # Limit to 10 concurrent requests
 
         # First, check cache for all tickers
         for ticker in tickers:
@@ -97,41 +116,39 @@ class FundamentalFetcher:
         if not tickers_to_fetch:
             return results
 
-        # Wrapper to ensure we always have the ticker context, even on error
-        async def fetch_with_context(ticker: str):
-            try:
+        # Wrapper to manage the semaphore
+        async def fetch_with_semaphore(ticker: str):
+            async with semaphore:
+                if is_cancelled():
+                    return ticker, None
+                # Add a small, random pre-emptive delay
+                await asyncio.sleep(random.uniform(0.1, 0.5))
                 data = await self._fetch_single_ticker_data(ticker)
-                return ticker, data, None
-            except Exception as e:
-                return ticker, None, e
+                return ticker, data
 
-        # Create tasks using the wrapper
-        tasks = [fetch_with_context(t) for t in tickers_to_fetch]
-
+        tasks = [fetch_with_semaphore(t) for t in tickers_to_fetch]
         fetched_count = 0
         total_to_fetch = len(tickers_to_fetch)
 
         for future in asyncio.as_completed(tasks):
             if is_cancelled():
                 logging.info("Async fetch cancelled by user. Remaining tasks will be abandoned.")
+                # Cancel remaining tasks
+                for task in tasks:
+                    task.cancel()
                 break
 
             try:
-                ticker, data, error = await future
-
-                if error:
-                    logging.error(f"Error fetching fundamental data for {ticker}: {error}")
-                elif data:
+                ticker, data = await future
+                if data:
                     results[ticker] = data
                     self._save_to_cache(ticker, data)
 
                 fetched_count += 1
                 if progress_callback:
-                    # Provide a generic progress update or one with the ticker
                     progress_callback(f"Fetched fundamentals for {ticker} ({fetched_count}/{total_to_fetch})")
             except asyncio.CancelledError:
-                logging.info("A fetch task was cancelled.")
-
+                pass # Expected when tasks are cancelled
 
         return results
 
