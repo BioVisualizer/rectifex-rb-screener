@@ -147,11 +147,38 @@ def get_ticker_list(index_name: str) -> list[str]:
 
     return tickers
 
+def get_master_ticker_list() -> list[str] | None:
+    """
+    Loads tickers from the master CSV file if it exists.
+    """
+    master_list_path = Path("data/master_tickers.csv")
+    if not master_list_path.exists():
+        return None
+
+    try:
+        logging.info(f"Loading master ticker list from {master_list_path}")
+        df = pd.read_csv(master_list_path)
+        ticker_col = 'Ticker' if 'Ticker' in df.columns else df.columns[0]
+        return df[ticker_col].dropna().tolist()
+    except Exception as e:
+        logging.error(f"Failed to read or parse master CSV {master_list_path}: {e}")
+        return None
+
 def get_all_tickers() -> dict[str, list[str]]:
     """
-    Gets all tickers from all configured indices, grouped by market.
+    Gets all tickers. Prioritizes a master ticker list if it exists.
+    Otherwise, gets tickers from all configured indices, grouped by market.
     Returns a dictionary mapping market -> list of unique tickers.
     """
+    # Check for master ticker list first
+    master_tickers = get_master_ticker_list()
+    if master_tickers is not None:
+        logging.info("Using master ticker list. Bypassing index-specific loading.")
+        # Return all tickers under a single generic market key
+        return {"CUSTOM": sorted(list(set(master_tickers)))}
+
+    # Fallback to original logic if no master list is found
+    logging.info("Master ticker list not found. Proceeding with index-based loading.")
     market_to_tickers = {}
     for index_name, details in config.INDICES.items():
         market = details['market']
