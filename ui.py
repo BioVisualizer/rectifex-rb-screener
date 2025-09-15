@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import (
     QObject, QThread, pyqtSignal, QAbstractTableModel, Qt, QSortFilterProxyModel, QRegularExpression
 )
-from PyQt6.QtGui import QColor, QIcon
+from PyQt6.QtGui import QColor, QIcon, QPixmap
 
 # For charting
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -319,7 +319,7 @@ class ChartWindow(QWidget):
             price_ax.text(0.02, 0.98, info_text, transform=price_ax.transAxes, fontsize=9,
                           verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5))
 
-            self.figure.tight_layout(rect=[0, 0, 1, 0.96])
+            self.figure.subplots_adjust(top=0.92, bottom=0.08, left=0.08, right=0.95, hspace=0.15)
             self.canvas.draw()
 
         except Exception as e:
