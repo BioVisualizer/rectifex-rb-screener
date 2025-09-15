@@ -19,6 +19,3 @@ build-dir/
 
 # Cache
 .cache/
-
-# Logs
-*.log

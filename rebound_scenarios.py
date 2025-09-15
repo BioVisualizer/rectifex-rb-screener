@@ -242,29 +242,32 @@ class ClassicOversoldScenario(BaseScenario):
             if self.is_cancelled():
                 break
             self._emit_progress(f"--- Processing Market: {market} ---")
-            index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
-            if not index_ticker:
-                self._emit_progress(f"No index ticker for market '{market}'. Skipping.")
-                processed_tickers += len(tickers)
-                continue
 
-            if index_ticker not in index_data_cache:
-                index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
-                market_context_ok[market] = passes_market_context_filter(index_data_cache[index_ticker])
+            if market != 'CUSTOM':
+                index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
+                if not index_ticker:
+                    self._emit_progress(f"No index ticker for market '{market}'. Skipping.")
+                    processed_tickers += len(tickers)
+                    continue
 
-            if not market_context_ok.get(market, False):
-                self._emit_progress(f"Market context for {market} is bearish. Skipping tickers.")
-                processed_tickers += len(tickers)
-                continue
+                if index_ticker not in index_data_cache:
+                    index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
+                    market_context_ok[market] = passes_market_context_filter(index_data_cache[index_ticker])
 
-            self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
+                if not market_context_ok.get(market, False):
+                    self._emit_progress(f"Market context for {market} is bearish. Skipping tickers.")
+                    processed_tickers += len(tickers)
+                    continue
+                self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
+            else:
+                self._emit_progress(f"Processing custom ticker list. Analyzing {len(tickers)} tickers.")
             for ticker in tickers:
                 if self.is_cancelled():
                     self._emit_progress("Scan cancelled by user.")
                     break
                 processed_tickers += 1
                 self._emit_percent(int((processed_tickers / total_tickers) * 100))
-                self._emit_progress(f"Scanning {market}: Analyzing {ticker} ({processed_tickers}/{total_tickers})")
+                self._emit_progress(f"Analyzing [{processed_tickers}/{total_tickers}] {ticker}")
 
                 stock_info = get_ticker_info_cached(ticker)
                 if not passes_liquidity_filter(stock_info):
@@ -341,21 +344,24 @@ class MeanReversionScenario(BaseScenario):
         for market, tickers in all_tickers.items():
             if self.is_cancelled(): break
             self._emit_progress(f"--- Processing Market: {market} ---")
-            index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
-            if not index_ticker:
-                processed_tickers += len(tickers)
-                continue
 
-            if index_ticker not in index_data_cache:
-                index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
-                market_context_ok[market] = passes_market_context_filter(index_data_cache[index_ticker])
+            if market != 'CUSTOM':
+                index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
+                if not index_ticker:
+                    processed_tickers += len(tickers)
+                    continue
 
-            if not market_context_ok.get(market, False):
-                self._emit_progress(f"Market context for {market} is bearish. Skipping tickers.")
-                processed_tickers += len(tickers)
-                continue
+                if index_ticker not in index_data_cache:
+                    index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
+                    market_context_ok[market] = passes_market_context_filter(index_data_cache[index_ticker])
 
-            self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
+                if not market_context_ok.get(market, False):
+                    self._emit_progress(f"Market context for {market} is bearish. Skipping tickers.")
+                    processed_tickers += len(tickers)
+                    continue
+                self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
+            else:
+                self._emit_progress(f"Processing custom ticker list. Analyzing {len(tickers)} tickers.")
             for ticker in tickers:
                 if self.is_cancelled(): break
                 processed_tickers += 1
@@ -538,21 +544,24 @@ class MomentumBreakoutScenario(BaseScenario):
         for market, tickers in all_tickers.items():
             if self.is_cancelled(): break
             self._emit_progress(f"--- Processing Market: {market} ---")
-            index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
-            if not index_ticker:
-                processed_tickers += len(tickers)
-                continue
 
-            if index_ticker not in index_data_cache:
-                index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
-                market_context_ok[market] = passes_market_context_filter(index_data_cache[index_ticker])
+            if market != 'CUSTOM':
+                index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
+                if not index_ticker:
+                    processed_tickers += len(tickers)
+                    continue
 
-            if not market_context_ok.get(market, False):
-                self._emit_progress(f"Market context for {market} is bearish. Skipping breakouts.")
-                processed_tickers += len(tickers)
-                continue
+                if index_ticker not in index_data_cache:
+                    index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
+                    market_context_ok[market] = passes_market_context_filter(index_data_cache[index_ticker])
 
-            self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
+                if not market_context_ok.get(market, False):
+                    self._emit_progress(f"Market context for {market} is bearish. Skipping breakouts.")
+                    processed_tickers += len(tickers)
+                    continue
+                self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
+            else:
+                self._emit_progress(f"Processing custom ticker list. Analyzing {len(tickers)} tickers.")
             for ticker in tickers:
                 if self.is_cancelled(): break
                 processed_tickers += 1
@@ -641,21 +650,24 @@ class GoldenCrossScenario(BaseScenario):
         for market, tickers in all_tickers.items():
             if self.is_cancelled(): break
             self._emit_progress(f"--- Processing Market: {market} ---")
-            index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
-            if not index_ticker:
-                processed_tickers += len(tickers)
-                continue
 
-            if index_ticker not in index_data_cache:
-                index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
-                market_context_ok[market] = passes_market_context_filter(index_data_cache[index_ticker])
+            if market != 'CUSTOM':
+                index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
+                if not index_ticker:
+                    processed_tickers += len(tickers)
+                    continue
 
-            if not market_context_ok.get(market, False):
-                self._emit_progress(f"Market context for {market} is bearish. Skipping tickers.")
-                processed_tickers += len(tickers)
-                continue
+                if index_ticker not in index_data_cache:
+                    index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
+                    market_context_ok[market] = passes_market_context_filter(index_data_cache[index_ticker])
 
-            self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
+                if not market_context_ok.get(market, False):
+                    self._emit_progress(f"Market context for {market} is bearish. Skipping tickers.")
+                    processed_tickers += len(tickers)
+                    continue
+                self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
+            else:
+                self._emit_progress(f"Processing custom ticker list. Analyzing {len(tickers)} tickers.")
             for ticker in tickers:
                 if self.is_cancelled(): break
                 processed_tickers += 1
