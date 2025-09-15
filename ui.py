@@ -252,7 +252,14 @@ class ChartWindow(QWidget):
                 self.canvas.draw()
                 return
 
-            plot_data = candidate.history_df.copy()
+            history_df = candidate.history_df.copy()
+
+            # Limit data to the configured number of months for charting
+            if not history_df.empty and config.CHART_HISTORY_MONTHS > 0:
+                cutoff_date = history_df.index.max() - pd.DateOffset(months=config.CHART_HISTORY_MONTHS)
+                plot_data = history_df.loc[cutoff_date:]
+            else:
+                plot_data = history_df
 
             # --- Indicator Calculations ---
             if 'SMA50' not in plot_data.columns:

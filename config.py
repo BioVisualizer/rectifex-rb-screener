@@ -82,6 +82,7 @@ PROXIMITY_SCORE_CEILING = 3.0 # Distance in percent that corresponds to a score 
 
 # -- GUI Configuration --
 APP_NAME = "Rectifex RB - Global Rebound Stock Screener"
+# The number of months of historical data to display on the chart.
 CHART_HISTORY_MONTHS = 12
 CSV_EXPORT_FILENAME = "rebound_candidates.csv"
 XLSX_EXPORT_FILENAME = "rebound_candidates.xlsx"
