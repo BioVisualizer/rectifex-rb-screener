@@ -8,10 +8,10 @@ import shutil
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableView, QStatusBar, QFileDialog, QMessageBox, QHeaderView,
-    QProgressBar, QComboBox, QLabel
+    QProgressBar, QComboBox, QLabel, QLineEdit
 )
 from PyQt6.QtCore import (
-    QObject, QThread, pyqtSignal, QAbstractTableModel, Qt, QSortFilterProxyModel
+    QObject, QThread, pyqtSignal, QAbstractTableModel, Qt, QSortFilterProxyModel, QRegularExpression
 )
 from PyQt6.QtGui import QColor, QIcon, QPixmap
 
@@ -26,7 +26,7 @@ import data_loader
 from ticker_manager import TickerManagerDialog
 from data_structures import ReboundCandidate
 from fundamental_fetcher import FundamentalFetcher
-from rebound_scenarios import ScenarioRunner, calculate_rsi, calculate_sma
+from rebound_scenarios import ScenarioRunner, calculate_rsi, calculate_sma, calculate_macd
 
 # --- Worker Thread for Running Analysis ---
 
@@ -145,8 +145,48 @@ class PandasModel(QAbstractTableModel):
 
 class CustomSortProxyModel(QSortFilterProxyModel):
     """
-    A custom proxy model to handle numerical sorting for specific columns.
+    A custom proxy model to handle numerical sorting for specific columns
+    and text-based filtering across designated columns.
     """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._filter_column_indices = []
+
+    def set_filter_columns_by_name(self, column_names: list, source_model: QAbstractTableModel):
+        """
+        Sets the columns to be searched by their string names.
+        This must be called after a source model is set.
+        """
+        if not source_model or not hasattr(source_model, 'get_dataframe'):
+            self._filter_column_indices = []
+            return
+
+        df_columns = source_model.get_dataframe().columns.tolist()
+        self._filter_column_indices = [df_columns.index(name) for name in column_names if name in df_columns]
+        self.invalidateFilter()
+
+    def filterAcceptsRow(self, source_row, source_parent):
+        """
+        Custom filter logic. It checks if the filter regex matches in any of the
+        specified columns.
+        """
+        regex = self.filterRegularExpression()
+        if not regex.pattern():
+            return True  # No filter set, accept all rows
+
+        # If no columns are specified for filtering, check all columns by default
+        columns_to_check = self._filter_column_indices
+        if not columns_to_check:
+            columns_to_check = range(self.sourceModel().columnCount())
+
+        for col_index in columns_to_check:
+            source_index = self.sourceModel().index(source_row, col_index, source_parent)
+            cell_data = self.sourceModel().data(source_index, Qt.ItemDataRole.DisplayRole)
+            if cell_data and regex.match(str(cell_data)).hasMatch():
+                return True
+
+        return False
+
     def lessThan(self, left, right):
         """
         Custom sorting logic. It performs numerical comparison for the 'Score'
@@ -217,15 +257,24 @@ class ChartWindow(QWidget):
             if 'RSI' not in plot_data.columns:
                 plot_data['RSI'] = calculate_rsi(plot_data['Close'])
 
-            # 1. Define additional plots (SMAs, RSI)
+            # Calculate MACD
+            macd_line, signal_line, macd_hist = calculate_macd(plot_data['Close'])
+
+            # 1. Define additional plots (SMAs, RSI, MACD)
             add_plots = []
             if 'SMA50' in plot_data.columns and not plot_data['SMA50'].empty:
-                add_plots.append(mpf.make_addplot(plot_data['SMA50'], color='green', width=0.7))
+                add_plots.append(mpf.make_addplot(plot_data['SMA50'], color='blue', width=0.7))
             if 'SMA200' in plot_data.columns and not plot_data['SMA200'].empty:
-                add_plots.append(mpf.make_addplot(plot_data['SMA200'], color='blue', width=0.7))
+                add_plots.append(mpf.make_addplot(plot_data['SMA200'], color='orange', width=0.7))
 
-            # RSI is now guaranteed to be present, so we can always add it.
-            add_plots.append(mpf.make_addplot(plot_data['RSI'], panel=2, color='orange', ylabel='RSI'))
+            # RSI plot with a distinct color and panel
+            add_plots.append(mpf.make_addplot(plot_data['RSI'], panel=2, color='purple', ylabel='RSI', width=0.8))
+
+            # MACD plots
+            add_plots.append(mpf.make_addplot(macd_hist, type='bar', panel=3, color='grey', alpha=0.5, ylabel='MACD'))
+            add_plots.append(mpf.make_addplot(macd_line, panel=3, color='blue', width=0.7))
+            add_plots.append(mpf.make_addplot(signal_line, panel=3, color='red', width=0.7))
+
 
             # 2. Generate the plot
             fig, axes = mpf.plot(plot_data,
@@ -234,12 +283,18 @@ class ChartWindow(QWidget):
                                  title=f'{candidate.ticker} - {candidate.scenario}',
                                  volume=True,
                                  addplot=add_plots,
-                                 panel_ratios=(3, 1, 1), # This is now safe
+                                 panel_ratios=(6, 1, 2, 2), # Ratios for main, volume, rsi, macd
                                  returnfig=True,
-                                 figsize=(10, 7)
+                                 figsize=(10, 8) # Adjusted for the new panel
                                 )
 
-            # 3. Add the information box to the main axes
+            # 3. Add RSI horizontal lines for overbought/oversold
+            # axes are: [price_ax, date_ax, volume_ax, date_ax_vol, rsi_ax, date_ax_rsi, macd_ax, date_ax_macd]
+            rsi_ax = axes[4]
+            rsi_ax.axhline(70, color='red', linestyle='--', linewidth=0.7, alpha=0.8)
+            rsi_ax.axhline(30, color='green', linestyle='--', linewidth=0.7, alpha=0.8)
+
+            # 4. Add the information box to the main axes
             main_ax = axes[0]
             eps_growth = candidate.fundamentals.get('earningsGrowth')
             eps_growth_str = f"{eps_growth * 100:.2f}%" if eps_growth is not None else "N/A"
@@ -260,13 +315,13 @@ class ChartWindow(QWidget):
             main_ax.text(0.02, 0.98, info_text, transform=main_ax.transAxes, fontsize=9,
                          verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5))
 
-            # 4. Save the figure to a temporary file
+            # 5. Save the figure to a temporary file
             chart_path = config.CACHE_DIR / f"{candidate.ticker}_chart.png"
             chart_path.parent.mkdir(parents=True, exist_ok=True)
             fig.savefig(chart_path, bbox_inches='tight')
             plt.close(fig)
 
-            # 5. Load the image into the QLabel
+            # 6. Load the image into the QLabel
             pixmap = QPixmap(str(chart_path))
             self.image_label.setPixmap(pixmap)
 
@@ -328,10 +383,20 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(self.export_excel_button)
         controls_layout.addWidget(self.help_button)
 
+        main_layout.addLayout(controls_layout)
+
+        # Add search bar below the main controls
+        search_layout = QHBoxLayout()
+        search_layout.addWidget(QLabel("Filter Results:"))
+        self.search_input = QLineEdit()
+        self.search_input.setObjectName("searchInput")
+        self.search_input.setPlaceholderText("Enter Ticker or Name to filter...")
+        self.search_input.setClearButtonEnabled(True)
+        search_layout.addWidget(self.search_input)
+        main_layout.addLayout(search_layout)
+
         self.table_view = QTableView()
         self.table_view.setSortingEnabled(True)
-
-        main_layout.addLayout(controls_layout)
         main_layout.addWidget(self.table_view)
 
         # Status bar with progress bar
@@ -350,6 +415,16 @@ class MainWindow(QMainWindow):
         self.table_view.doubleClicked.connect(self.open_chart_for_selection)
         self.export_csv_button.clicked.connect(self.export_to_csv)
         self.export_excel_button.clicked.connect(self.export_to_excel)
+        self.search_input.textChanged.connect(self.filter_table)
+
+    def filter_table(self, text: str):
+        """Filters the table view based on the search input."""
+        proxy_model = self.table_view.model()
+        if isinstance(proxy_model, CustomSortProxyModel):
+            # QRegularExpression provides more powerful filtering than simple strings
+            # and allows for case-insensitivity.
+            regex = QRegularExpression(text, QRegularExpression.PatternOption.CaseInsensitiveOption)
+            proxy_model.setFilterRegularExpression(regex)
 
     def stop_scan(self):
         """Requests the worker thread to stop."""
@@ -481,9 +556,12 @@ class MainWindow(QMainWindow):
         self.all_candidates_data = results
 
         model = PandasModel(self.results_df, self.all_candidates_data)
-        # Use the custom proxy model for robust sorting
+        # Use the custom proxy model for robust sorting and filtering
         proxy_model = CustomSortProxyModel()
         proxy_model.setSourceModel(model)
+        # Tell the proxy model which columns to search
+        proxy_model.set_filter_columns_by_name(['Ticker', 'Name'], model)
+
         self.table_view.setModel(proxy_model)
         self.table_view.resizeColumnsToContents()
         self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)

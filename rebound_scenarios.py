@@ -48,6 +48,26 @@ def calculate_bollinger_bands(data: pd.Series, window: int = 20, num_std_dev: in
 
     return upper_band, middle_band, lower_band
 
+def calculate_macd(data: pd.Series, fast_period: int = 12, slow_period: int = 26, signal_period: int = 9) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    Calculates the Moving Average Convergence Divergence (MACD).
+
+    Returns a tuple containing:
+    - MACD line (fast_ema - slow_ema)
+    - Signal line (9-period EMA of MACD line)
+    - MACD Histogram (MACD line - Signal line)
+    """
+    if data is None or len(data) < slow_period:
+        return pd.Series(dtype=np.float64), pd.Series(dtype=np.float64), pd.Series(dtype=np.float64)
+
+    fast_ema = data.ewm(span=fast_period, adjust=False).mean()
+    slow_ema = data.ewm(span=slow_period, adjust=False).mean()
+    macd_line = fast_ema - slow_ema
+    signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
+    histogram = macd_line - signal_line
+
+    return macd_line, signal_line, histogram
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
