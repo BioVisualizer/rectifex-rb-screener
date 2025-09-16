@@ -283,33 +283,40 @@ class ChartWindow(QWidget):
             volume_ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
             rsi_ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
 
-            # --- Plotting with mplfinance (Primary) ---
+            # --- Plotting with mplfinance ---
+            # Create a list of additional plots (subplots) for the indicators.
+            add_plots = [
+                # RSI Plot
+                mpf.make_addplot(plot_data['RSI'], panel=2, color='purple', ylabel='RSI'),
+                # MACD Plot
+                mpf.make_addplot(macd_line, panel=3, color='blue', ylabel='MACD'),
+                mpf.make_addplot(signal_line, panel=3, color='red'),
+                mpf.make_addplot(macd_hist, type='bar', panel=3, color='grey', alpha=0.5)
+            ]
+
+            # The main plot call now includes moving averages and additional plots.
             mpf.plot(plot_data,
                      type='candle',
                      ax=price_ax,
                      volume=volume_ax,
+                     mav=(50, 200),  # Let mplfinance handle moving averages
+                     addplot=add_plots,
                      style='yahoo',
-                     xrotation=20)
-
-            # --- Manual Plotting of Indicators (Secondary) ---
-            price_ax.plot(plot_data.index, plot_data['SMA50'], color='blue', linewidth=0.7, label='SMA50')
-            price_ax.plot(plot_data.index, plot_data['SMA200'], color='orange', linewidth=0.7, label='SMA200')
-
-            rsi_ax.plot(plot_data.index, plot_data['RSI'], color='purple', linewidth=0.8, label='RSI')
-
-            macd_ax.bar(plot_data.index, macd_hist, color='grey', alpha=0.5, width=1, label='Histogram')
-            macd_ax.plot(plot_data.index, macd_line, color='blue', linewidth=0.7, label='MACD')
-            macd_ax.plot(plot_data.index, signal_line, color='red', linewidth=0.7, label='Signal')
+                     xrotation=20,
+                     fig=self.figure, # Pass the figure to ensure it's used
+                     panel_ratios=(6, 1, 2, 2)) # Match the gridspec ratios
 
             # --- Styling and Labels ---
+            # mplfinance handles most styling. We just need to set the main title.
             self.figure.suptitle(f'{candidate.ticker} - {candidate.scenario}', y=0.98)
-            price_ax.legend()
-            rsi_ax.set_ylabel('RSI')
-            macd_ax.set_ylabel('MACD')
 
+            # Set y-limits and horizontal lines for the RSI panel
+            # Note: mplfinance axes are accessed via `figure.axes`
+            # RSI axis is the 3rd one created (0=price, 1=volume, 2=RSI, 3=MACD)
+            rsi_ax = self.figure.axes[2]
             rsi_ax.axhline(70, color='red', linestyle='--', linewidth=0.7, alpha=0.8)
             rsi_ax.axhline(30, color='green', linestyle='--', linewidth=0.7, alpha=0.8)
-            rsi_ax.set_ylim(0, 100) # Fix RSI y-axis scale
+            rsi_ax.set_ylim(0, 100)
 
             # Add info text box
             eps_growth = candidate.fundamentals.get('earningsGrowth')
