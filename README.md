@@ -105,25 +105,37 @@ flatpak run com.rectifex.GlobalReboundScreener
 
 ## How to Extend the Stock Universe
 
-The application's stock universe is determined by the ticker lists it loads on startup. While it attempts to scrape the latest lists from Wikipedia for US and German indices, the most reliable way to manage and expand the lists for European and Japanese markets is by editing the local CSV files.
+The application's stock universe is now managed through a single, comprehensive file: `data/master_tickers.csv`. This file acts as the single source of truth for all tickers scanned by the application, overriding the individual index lists. This centralized approach makes it easy to manage a large and diverse set of stocks.
 
-The fallback data files are located in the `data/` directory:
+### The Master Ticker File
 
-*   `data/sp500_tickers.csv`
-*   `data/nasdaq100_tickers.csv`
-*   `data/dax_tickers.csv`
-*   `data/stoxx600_tickers.csv`
-*   `data/nikkei225_tickers.csv`
+*   **Location**: `data/master_tickers.csv`
+*   **Format**: A simple CSV file with a single column named "Ticker". Each row should contain one ticker symbol.
 
-To expand the number of scanned tickers, particularly for the STOXX 600 and Nikkei 225, simply open the corresponding CSV file and add new ticker symbols, one per line.
+### How to Add or Remove Stocks
 
-**Important:** The tickers must be in a format that `yfinance` can understand.
-*   For most exchanges, this is the standard ticker symbol.
-*   For German stocks (XETRA), add the suffix `.DE` (e.g., `SAP.DE`).
-*   For Japanese stocks (Tokyo Stock Exchange), add the suffix `.T` (e.g., `6758.T`).
-*   For other European exchanges, the suffix varies (e.g., `.PA` for Paris, `.L` for London, `.MI` for Milan).
+To add or remove stocks from the screener, simply edit the `data/master_tickers.csv` file:
 
-By manually curating these lists, you have full control over the stock universe the application analyzes.
+1.  **Open `data/master_tickers.csv`** in a text editor or spreadsheet program.
+2.  **To add a stock**: Add a new row with the ticker symbol.
+3.  **To remove a stock**: Delete the corresponding row.
+4.  **Save the file.** The application will use the updated list the next time it starts.
+
+**Important:** The tickers must be in a format that `yfinance` can understand. This often requires a market-specific suffix:
+*   **US Stocks**: No suffix needed (e.g., `AAPL`, `GOOGL`).
+*   **German Stocks (XETRA)**: `.DE` (e.g., `SAP.DE`).
+*   **Japanese Stocks (Tokyo)**: `.T` (e.g., `7203.T`).
+*   **French Stocks (Euronext Paris)**: `.PA` (e.g., `AIR.PA`).
+*   **Other European Exchanges**: Suffixes vary (e.g., `.AS` for Amsterdam, `.MI` for Milan, `.MC` for Madrid).
+
+### Maintaining the Ticker List
+
+The stock market is constantly changing, with IPOs, delistings, and index rebalancing. To keep the master ticker list relevant, we recommend the following process:
+
+*   **Periodic Review**: At least once per quarter, review the components of the major indices (DAX, S&P 500, etc.) and update the `master_tickers.csv` file accordingly.
+*   **Future Enhancements**: A future version of this application could include a feature allowing users to report missing tickers directly from the UI, which would help automate the maintenance process.
+
+By manually curating the `master_tickers.csv` file, you have full control over the stock universe the application analyzes.
 
 ## Disclaimer
 
