@@ -208,7 +208,7 @@ def get_stock_data(ticker: str) -> pd.DataFrame | None:
             logging.info(f"Loading {ticker} data from cache.")
             try:
                 # The cached file should have a simple header now
-                df = pd.read_csv(cache_file, index_col='Date', parse_dates=True)
+                df = pd.read_csv(cache_file, index_col='Date', parse_dates=['Date'])
                 return df
             except Exception as e:
                 logging.warning(f"Could not read cache file for {ticker}, refetching. Error: {e}")
