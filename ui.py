@@ -124,13 +124,30 @@ class PandasModel(QAbstractTableModel):
             # Get the full candidate data for this row to create a detailed tooltip
             if row < len(self.candidates_data):
                 candidate = self.candidates_data[row]
-                # Only the 'Classic Oversold' scenario has this specific breakdown
+                breakdown_tooltip = ""
+
                 if candidate.scenario == "Classic Oversold":
                     rsi_score = candidate.technicals.get('rsi_score')
                     prox_score = candidate.technicals.get('prox_score')
                     if rsi_score is not None and prox_score is not None:
                         breakdown_tooltip = f"\n\nBreakdown ('Classic Oversold'):\n- RSI Score: {int(rsi_score)} / 60\n- Proximity Score: {int(prox_score)} / 40"
-                        return base_tooltip + breakdown_tooltip
+
+                elif candidate.scenario == "Fundamental Divergence":
+                    tech = candidate.technicals
+                    breakdown_tooltip = (
+                        f"\n\nBreakdown ('Fundamental Divergence'):\n"
+                        f"- Revenue Growth: {int(tech.get('rev_growth_score', 0) * 0.20)} / 20 pts\n"
+                        f"- EPS Momentum: {int(tech.get('eps_score', 0) * 0.20)} / 20 pts\n"
+                        f"- Free Cashflow: {int(tech.get('fcf_score', 0) * 0.10)} / 10 pts\n"
+                        f"- Debt-to-Equity: {int(tech.get('d2e_score', 0) * 0.10)} / 10 pts\n"
+                        f"- Price Range: {int(tech.get('range_score', 0) * 0.15)} / 15 pts\n"
+                        f"- SMA Proximity: {int(tech.get('sma_score', 0) * 0.10)} / 10 pts\n"
+                        f"- Relative Perf.: {int(tech.get('rel_perf_score', 0) * 0.10)} / 10 pts\n"
+                        f"- Valuation: {int(tech.get('valuation_score', 0) * 0.05)} / 5 pts"
+                    )
+
+                if breakdown_tooltip:
+                    return base_tooltip + breakdown_tooltip
             return base_tooltip
 
         return None
@@ -461,6 +478,7 @@ class MainWindow(QMainWindow):
         <ul>
             <li><b>Classic Oversold:</b> Looks for technically oversold stocks (low RSI) near strong, long-term support levels (200-day average or 90-day low).</li>
             <li><b>Quality Stock Pullback:</b> Finds fundamentally strong companies in a healthy uptrend that have experienced a minor price dip towards their 50-day average.</li>
+            <li><b>Fundamental Divergence:</b> Identifies fundamentally strong stocks whose price has been stagnating or underperforming, creating a potential 'value' or 'contrarian' opportunity.</li>
             <li><b>Momentum Breakout:</b> Identifies stocks hitting new 52-week highs on high trading volume, signaling strong upward momentum.</li>
             <li><b>Golden Cross:</b> Detects when a stock's 50-day moving average has recently crossed above its 200-day average, a strong long-term bullish signal.</li>
             <li><b>Mean Reversion (Bollinger Bands):</b> Finds stocks trading at or below their lower Bollinger Band, suggesting a statistically oversold condition and a potential rebound.</li>

@@ -68,6 +68,8 @@ class FundamentalFetcher:
                     logging.warning(f"No valid fundamental info returned for {ticker}")
                     return None
 
+                # Fields for multiple scenarios are fetched at once.
+                # If a field is not available for a ticker, it will be None.
                 required_fields = {
                     'trailingEps': info.get('trailingEps'),
                     'revenueGrowth': info.get('revenueGrowth'),
@@ -75,6 +77,9 @@ class FundamentalFetcher:
                     'earningsGrowth': info.get('earningsGrowth'),
                     'dividendYield': info.get('dividendYield'),
                     'payoutRatio': info.get('payoutRatio'),
+                    'freeCashflow': info.get('freeCashflow'),
+                    'forwardPE': info.get('forwardPE'),
+                    'enterpriseToEbitda': info.get('enterpriseToEbitda'),
                 }
                 return required_fields
 
