@@ -814,6 +814,254 @@ class HighQualityDividendScenario(BaseScenario):
         return all_candidates
 
 
+class FundamentalDivergenceScenario(BaseScenario):
+    """
+    Identifies fundamentally strong stocks whose price has been stagnating or underperforming,
+    creating a potential 'value' or 'contrarian' opportunity.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__("Fundamental Divergence", *args, **kwargs)
+        self.scan_period = config.FD_PRICE_RANGE_PERIOD
+
+    def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculates all necessary technical indicators."""
+        if df is None or df.empty or len(df) < self.scan_period:
+            return pd.DataFrame()
+
+        df['SMA50'] = calculate_sma(df['Close'], 50)
+        df['SMA200'] = calculate_sma(df['Close'], 200)
+
+        # Calculate price range over the last `scan_period` days
+        recent_prices = df['Close'].tail(self.scan_period)
+        if not recent_prices.empty:
+            max_price = recent_prices.max()
+            min_price = recent_prices.min()
+            last_price = recent_prices.iloc[-1]
+            if last_price > 0:
+                 # Note: The spec says "+/- 10%", which is a 20% range.
+                df['PriceRange120D'] = (max_price - min_price) / last_price
+
+        return df
+
+    def _scale_linear(self, value: float, val_min: float, val_max: float, score_min: int, score_max: int) -> float:
+        """Linearly scales a value from one range to a score range."""
+        if value is None: return 0
+
+        # Handle cases where min and max are swapped for inverse scoring (e.g., debt-to-equity)
+        if val_min > val_max:
+            if value >= val_min: return score_min
+            if value <= val_max: return score_max
+            val_min, val_max = val_max, val_min
+            score_min, score_max = score_max, score_min
+        else:
+            if value <= val_min: return score_min
+            if value >= val_max: return score_max
+
+        # Perform scaling
+        return score_min + ((value - val_min) / (val_max - val_min)) * (score_max - score_min)
+
+    def _calculate_score(self, fundamentals: dict, technicals: dict) -> tuple[int, dict]:
+        """Calculates the divergence score based on multiple criteria."""
+        score = 0
+        breakdown = {}
+
+        # 1. Umsatzwachstum (20%)
+        rev_growth = fundamentals.get('revenueGrowth', 0)
+        # linear skaliert (5% = 50 Punkte, >= 15% = 100 Punkte)
+        rev_growth_score = self._scale_linear(rev_growth, 0.05, 0.15, 50, 100)
+        score += rev_growth_score * 0.20
+        breakdown['rev_growth_score'] = rev_growth_score
+
+        # 2. EPS-Überraschung (20%) -> Using earningsGrowth as a proxy
+        eps_growth = fundamentals.get('earningsGrowth', -1)
+        eps_score = 100 if eps_growth is not None and eps_growth > 0 else 0
+        score += eps_score * 0.20
+        breakdown['eps_score'] = eps_score
+
+        # 3. Free Cashflow > 0 (10%)
+        fcf = fundamentals.get('freeCashflow', -1)
+        fcf_score = 100 if fcf is not None and fcf > 0 else 0
+        score += fcf_score * 0.10
+        breakdown['fcf_score'] = fcf_score
+
+        # 4. Debt-to-Equity (10%)
+        d2e = fundamentals.get('debtToEquity')
+        # linear skaliert (1.0 = 50 Punkte, 0.3 = 100 Punkte) -> inverse scaling
+        d2e_score = self._scale_linear(d2e, 1.0, 0.3, 50, 100)
+        score += d2e_score * 0.10
+        breakdown['d2e_score'] = d2e_score
+
+        # 5. Kursrange (15%)
+        price_range = technicals.get('price_range_120d', 999)
+        # 100 Punkte wenn ≤ 20% (i.e. +/- 10%), 50 Punkte wenn ≤ 30% (+/- 15%), sonst 0
+        range_score = 0
+        if price_range <= config.FD_MAX_PRICE_RANGE_STRONG:
+            range_score = 100
+        elif price_range <= config.FD_MAX_PRICE_RANGE_WEAK:
+            range_score = 50
+        score += range_score * 0.15
+        breakdown['range_score'] = range_score
+
+        # 6. SMA50 vs SMA200 (10%)
+        sma_diff = technicals.get('sma_diff_pct', 999)
+        # 100 Punkte wenn ≤ 5%, 50 Punkte wenn ≤ 10%, sonst 0
+        sma_score = 0
+        if sma_diff <= config.FD_MAX_SMA_DIFF_PERCENT:
+            sma_score = 100
+        elif sma_diff <= config.FD_MAX_SMA_DIFF_PERCENT * 2:
+            sma_score = 50
+        score += sma_score * 0.10
+        breakdown['sma_score'] = sma_score
+
+        # 7. Relative Performance (10%)
+        rel_perf = technicals.get('relative_perf_120d', 999)
+        # 100 Punkte wenn ≤ 0%, 50 Punkte wenn ≤ 5%, sonst 0
+        rel_perf_score = 0
+        if rel_perf <= 0:
+            rel_perf_score = 100
+        elif rel_perf <= 0.05:
+            rel_perf_score = 50
+        score += rel_perf_score * 0.10
+        breakdown['rel_perf_score'] = rel_perf_score
+
+        # 8. Optional Valuation (5%) - not implemented as per spec, giving default points
+        # For now, give a neutral score of 50 to not penalize stocks
+        valuation_score = 50
+        score += valuation_score * 0.05
+        breakdown['valuation_score'] = valuation_score
+
+        return int(score), breakdown
+
+    async def run(self) -> List[ReboundCandidate]:
+        self._emit_progress(f"Starting '{self.name}' scan...")
+        all_tickers_by_market = data_loader.get_all_tickers()
+        all_candidates = []
+
+        # This scan is fundamental, so we first gather all liquid tickers
+        liquid_tickers = []
+        self._emit_progress("Step 1: Filtering for liquid tickers...")
+        total_tickers_all_markets = sum(len(t) for t in all_tickers_by_market.values())
+        processed_tickers_count = 0
+
+        for market, tickers in all_tickers_by_market.items():
+            if self.is_cancelled(): break
+            for ticker in tickers:
+                if self.is_cancelled(): break
+                processed_tickers_count += 1
+                # Progress for liquidity filter is minimal, maybe up to 10%
+                self._emit_percent(int((processed_tickers_count / total_tickers_all_markets) * 10))
+                stock_info = get_ticker_info_cached(ticker)
+                if passes_liquidity_filter(stock_info):
+                    liquid_tickers.append((ticker, market))
+
+        if self.is_cancelled(): return []
+
+        # Progress for fundamental fetching is 10% -> 40%
+        def fundamental_progress_callback(message: str):
+            self._emit_progress(f"Step 2: {message}")
+            match = re.search(r'\((\d+)/(\d+)\)', message)
+            if match:
+                current, total = int(match.group(1)), int(match.group(2))
+                progress_pct = 10 + int((current / total) * 30)
+                self._emit_percent(progress_pct)
+
+        self._emit_progress(f"Step 2: Fetching fundamental data for {len(liquid_tickers)} liquid tickers...")
+        fundamental_data = await self.fetcher.get_fundamentals_for_tickers(
+            [t[0] for t in liquid_tickers],
+            progress_callback=fundamental_progress_callback,
+            is_cancelled_callback=self.is_cancelled
+        )
+
+        if self.is_cancelled(): return []
+
+        self._emit_progress(f"Step 3: Analyzing {len(liquid_tickers)} tickers for fundamental divergence...")
+        index_data_cache = {}
+        analysis_total = len(liquid_tickers)
+        analysis_processed = 0
+
+        for ticker, market in liquid_tickers:
+            if self.is_cancelled(): break
+            analysis_processed += 1
+            # Progress for analysis is 40% -> 100%
+            self._emit_percent(40 + int((analysis_processed / analysis_total) * 60))
+            self._emit_progress(f"Analyzing [{analysis_processed}/{analysis_total}] {ticker}")
+
+            fund_data = fundamental_data.get(ticker)
+            if not fund_data: continue
+
+            # --- (A) Initial Fundamental Filter ---
+            if not (fund_data.get('revenueGrowth') is not None and fund_data.get('revenueGrowth', 0) >= config.FD_MIN_REVENUE_GROWTH and
+                    fund_data.get('earningsGrowth') is not None and fund_data.get('earningsGrowth', -1) >= 0 and
+                    fund_data.get('freeCashflow') is not None and fund_data.get('freeCashflow', -1) > 0 and
+                    fund_data.get('debtToEquity') is not None and 0 < fund_data.get('debtToEquity', 999) < config.FD_MAX_DEBT_TO_EQUITY):
+                continue
+
+            stock_data = data_loader.get_stock_data(ticker)
+            if stock_data is None or len(stock_data) < self.scan_period: continue
+
+            stock_data = self._prepare_dataframe(stock_data)
+            if stock_data.empty or 'SMA50' not in stock_data.columns or 'SMA200' not in stock_data.columns: continue
+
+            latest = stock_data.iloc[-1]
+            if pd.isna(latest['SMA50']) or pd.isna(latest['SMA200']) or latest['SMA200'] <= 0: continue
+
+            # --- (B) Technical Consolidation ---
+            sma_diff_pct = abs(latest['SMA50'] - latest['SMA200']) / latest['SMA200']
+            price_range_120d = latest.get('PriceRange120D', 999)
+
+            # --- (C) Relative Performance ---
+            index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), "SPY")
+            if index_ticker not in index_data_cache:
+                index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
+
+            index_data = index_data_cache[index_ticker]
+            if index_data is None or len(index_data) < self.scan_period: continue
+
+            stock_prices_period = stock_data['Close'].tail(self.scan_period)
+            index_prices_period = index_data['Close'].tail(self.scan_period)
+            if len(stock_prices_period) < 2 or len(index_prices_period) < 2: continue
+
+            stock_perf = (stock_prices_period.iloc[-1] / stock_prices_period.iloc[0]) - 1
+            index_perf = (index_prices_period.iloc[-1] / index_prices_period.iloc[0]) - 1
+            relative_perf = stock_perf - index_perf
+
+            if relative_perf > 0.05: # Allow for slight outperformance (5%) as per scoring
+                continue
+
+            # --- Passed all filters, now calculate score ---
+            technicals_for_score = {
+                'price_range_120d': price_range_120d,
+                'sma_diff_pct': sma_diff_pct,
+                'relative_perf_120d': relative_perf
+            }
+
+            score, score_breakdown = self._calculate_score(fund_data, technicals_for_score)
+
+            if score >= config.FD_MIN_SCORE:
+                self._emit_progress(f"!!! {ticker} is a potential '{self.name}' candidate with score {score}!")
+                stock_info = get_ticker_info_cached(ticker)
+                fund_data['name'] = stock_info.get('shortName', 'N/A')
+
+                candidate = ReboundCandidate(
+                    ticker=ticker,
+                    scenario=self.name,
+                    score=score,
+                    history_df=stock_data,
+                    technicals={
+                        'price': round(latest['Close'], 2),
+                        'price_range_120d_pct': round(price_range_120d * 100, 2) if price_range_120d != 999 else 'N/A',
+                        'sma50_vs_sma200_pct': round(sma_diff_pct * 100, 2),
+                        'relative_perf_vs_index_pct': round(relative_perf * 100, 2),
+                        **score_breakdown
+                    },
+                    fundamentals=fund_data
+                )
+                all_candidates.append(candidate)
+
+        self._emit_progress(f"Scan complete. Found {len(all_candidates)} candidates.")
+        return all_candidates
+
+
 class QualityPullbackScenario(BaseScenario):
     """
     Implements the 'Quality Stock Pullback' scenario logic.
@@ -977,6 +1225,7 @@ class ScenarioRunner:
     SCENARIOS = {
         "Classic Oversold": ClassicOversoldScenario,
         "Quality Stock Pullback": QualityPullbackScenario,
+        "Fundamental Divergence": FundamentalDivergenceScenario,
         "Momentum Breakout": MomentumBreakoutScenario,
         "Golden Cross": GoldenCrossScenario,
         "Mean Reversion (Bollinger Bands)": MeanReversionScenario,

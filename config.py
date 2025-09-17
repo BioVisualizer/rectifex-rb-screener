@@ -80,6 +80,15 @@ SUPPORT_PROXIMITY_THRESHOLD = 3.0 # Max 3% above support zone
 RSI_SCORE_CEILING = 50 # RSI value that corresponds to a score of 0
 PROXIMITY_SCORE_CEILING = 3.0 # Distance in percent that corresponds to a score of 0
 
+# 4. Fundamental Divergence Scenario
+FD_PRICE_RANGE_PERIOD = 120
+FD_MAX_PRICE_RANGE_STRONG = 0.20 # Corresponds to a range of +/- 10%
+FD_MAX_PRICE_RANGE_WEAK = 0.30 # Corresponds to a range of +/- 15%
+FD_MAX_SMA_DIFF_PERCENT = 0.05 # Max 5% difference between SMA50 and SMA200
+FD_MIN_REVENUE_GROWTH = 0.05 # Min 5% YoY revenue growth
+FD_MAX_DEBT_TO_EQUITY = 1.0
+FD_MIN_SCORE = 60 # Minimum score to be included in the results
+
 # -- GUI Configuration --
 APP_NAME = "Rectifex RB - Global Rebound Stock Screener"
 # The number of months of historical data to display on the chart.
