@@ -990,10 +990,17 @@ class FundamentalDivergenceScenario(BaseScenario):
             if not fund_data: continue
 
             # --- (A) Initial Fundamental Filter ---
+            d2e = fund_data.get('debtToEquity')
+            # Handle potential data anomaly where D/E is given as a percentage.
+            if d2e is not None and d2e > 10:
+                self._emit_progress(f"Correcting anomalous D/E ratio for {ticker} from {d2e} to {d2e/100}")
+                d2e = d2e / 100.0
+                fund_data['debtToEquity'] = d2e # Update dict for scoring
+
             if not (fund_data.get('revenueGrowth') is not None and fund_data.get('revenueGrowth', 0) >= config.FD_MIN_REVENUE_GROWTH and
                     fund_data.get('earningsGrowth') is not None and fund_data.get('earningsGrowth', -1) >= 0 and
                     fund_data.get('freeCashflow') is not None and fund_data.get('freeCashflow', -1) > 0 and
-                    fund_data.get('debtToEquity') is not None and 0 < fund_data.get('debtToEquity', 999) < config.FD_MAX_DEBT_TO_EQUITY):
+                    d2e is not None and 0 < d2e < config.FD_MAX_DEBT_TO_EQUITY):
                 continue
 
             stock_data = data_loader.get_stock_data(ticker)
