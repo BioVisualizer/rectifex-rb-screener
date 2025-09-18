@@ -246,7 +246,7 @@ class ClassicOversoldScenario(BaseScenario):
                 break
             self._emit_progress(f"--- Processing Market: {market} ---")
 
-            if market != 'CUSTOM':
+            if market != 'CUSTOM' and not ticker:
                 index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
                 if not index_ticker:
                     self._emit_progress(f"No index ticker for market '{market}'. Skipping.")
@@ -282,11 +282,13 @@ class ClassicOversoldScenario(BaseScenario):
 
                 stock_data = self._prepare_dataframe(stock_data)
                 is_candidate, rsi, dist_sma, dist_low = self._check_signal(stock_data)
-                if not is_candidate:
-                    continue
 
-                self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
-                score, rsi_score, prox_score = self._calculate_score(rsi, dist_sma, dist_low)
+                score = 0
+                if is_candidate:
+                    self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
+                    score, rsi_score, prox_score = self._calculate_score(rsi, dist_sma, dist_low)
+                elif not ticker:
+                    continue
 
                 candidate = ReboundCandidate(
                     ticker=ticker_val,
@@ -297,9 +299,7 @@ class ClassicOversoldScenario(BaseScenario):
                         'price': round(stock_data['Close'].iloc[-1], 2),
                         'rsi': round(rsi, 2),
                         'dist_sma_200': round(dist_sma, 2),
-                        'dist_low_90d': round(dist_low, 2),
-                        'rsi_score': rsi_score,
-                        'prox_score': prox_score
+                        'dist_low_90d': round(dist_low, 2)
                     },
                     fundamentals={'name': stock_info.get('shortName', 'N/A')}
                 )
@@ -351,7 +351,7 @@ class MeanReversionScenario(BaseScenario):
             if self.is_cancelled(): break
             self._emit_progress(f"--- Processing Market: {market} ---")
 
-            if market != 'CUSTOM':
+            if market != 'CUSTOM' and not ticker:
                 index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
                 if not index_ticker:
                     processed_tickers += len(tickers)
@@ -389,26 +389,30 @@ class MeanReversionScenario(BaseScenario):
                 if pd.isna(current_price) or pd.isna(lower_band) or lower_band <= 0:
                     continue
 
+                score = 0
+                percent_below_band = 0
                 # Signal: Price is at or below the lower Bollinger Band
                 if current_price <= lower_band:
                     percent_below_band = ((lower_band - current_price) / current_price) * 100
 
                     self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
                     score = self._calculate_score(percent_below_band)
+                elif not ticker:
+                    continue
 
-                    candidate = ReboundCandidate(
-                        ticker=ticker_val,
-                        scenario=self.name,
-                        score=score,
-                        history_df=stock_data,
-                        technicals={
-                            'price': round(current_price, 2),
-                            'lower_band': round(lower_band, 2),
-                            'percent_below_band': round(percent_below_band, 2)
-                        },
-                        fundamentals={'name': stock_info.get('shortName', 'N/A')}
-                    )
-                    all_candidates.append(candidate)
+                candidate = ReboundCandidate(
+                    ticker=ticker_val,
+                    scenario=self.name,
+                    score=score,
+                    history_df=stock_data,
+                    technicals={
+                        'price': round(current_price, 2),
+                        'lower_band': round(lower_band, 2),
+                        'percent_below_band': round(percent_below_band, 2)
+                    },
+                    fundamentals={'name': stock_info.get('shortName', 'N/A')}
+                )
+                all_candidates.append(candidate)
 
         self._emit_progress(f"Scan complete. Found {len(all_candidates)} candidates.")
         return all_candidates
@@ -486,23 +490,26 @@ class VolatilitySqueezeScenario(BaseScenario):
                 if pd.isna(current_width) or pd.isna(min_width):
                     continue
 
+                score = 0
                 if current_width <= min_width * 1.1: # Signal: within 10% of the low
                     self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
                     score = self._calculate_score(current_width, min_width)
+                elif not ticker:
+                    continue
 
-                    candidate = ReboundCandidate(
-                        ticker=ticker_val,
-                        scenario=self.name,
-                        score=score,
-                        history_df=stock_data,
-                        technicals={
-                            'price': round(latest['Close'], 2),
-                            'bb_width': round(current_width, 4),
-                            'bb_width_min': round(min_width, 4)
-                        },
-                        fundamentals={'name': stock_info.get('shortName', 'N/A')}
-                    )
-                    all_candidates.append(candidate)
+                candidate = ReboundCandidate(
+                    ticker=ticker_val,
+                    scenario=self.name,
+                    score=score,
+                    history_df=stock_data,
+                    technicals={
+                        'price': round(latest['Close'], 2),
+                        'bb_width': round(current_width, 4),
+                        'bb_width_min': round(min_width, 4)
+                    },
+                    fundamentals={'name': stock_info.get('shortName', 'N/A')}
+                )
+                all_candidates.append(candidate)
 
         self._emit_progress(f"Scan complete. Found {len(all_candidates)} candidates.")
         return all_candidates
@@ -557,7 +564,7 @@ class MomentumBreakoutScenario(BaseScenario):
             if self.is_cancelled(): break
             self._emit_progress(f"--- Processing Market: {market} ---")
 
-            if market != 'CUSTOM':
+            if market != 'CUSTOM' and not ticker:
                 index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
                 if not index_ticker:
                     processed_tickers += len(tickers)
@@ -598,27 +605,32 @@ class MomentumBreakoutScenario(BaseScenario):
                 if pd.isna(current_price) or pd.isna(high_52w) or pd.isna(current_volume) or pd.isna(avg_volume) or avg_volume == 0:
                     continue
 
+                score = 0
+                volume_ratio = 0
+                breakout_pct = 0
                 # Signal: Price breaks above the 52-week high on high volume
                 if current_price > high_52w and current_volume > avg_volume * 1.5:
                     self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
                     volume_ratio = current_volume / avg_volume
                     breakout_pct = ((current_price - high_52w) / high_52w) * 100
                     score = self._calculate_score(volume_ratio, breakout_pct)
+                elif not ticker:
+                    continue
 
-                    candidate = ReboundCandidate(
-                        ticker=ticker_val,
-                        scenario=self.name,
-                        score=score,
-                        history_df=stock_data,
-                        technicals={
-                            'price': round(current_price, 2),
-                            '52w_high': round(high_52w, 2),
-                            'volume_ratio': round(volume_ratio, 2),
-                            'breakout_pct': round(breakout_pct, 2),
-                        },
-                        fundamentals={'name': stock_info.get('shortName', 'N/A')}
-                    )
-                    all_candidates.append(candidate)
+                candidate = ReboundCandidate(
+                    ticker=ticker_val,
+                    scenario=self.name,
+                    score=score,
+                    history_df=stock_data,
+                    technicals={
+                        'price': round(current_price, 2),
+                        '52w_high': round(high_52w, 2),
+                        'volume_ratio': round(volume_ratio, 2),
+                        'breakout_pct': round(breakout_pct, 2),
+                    },
+                    fundamentals={'name': stock_info.get('shortName', 'N/A')}
+                )
+                all_candidates.append(candidate)
 
         self._emit_progress(f"Scan complete. Found {len(all_candidates)} candidates.")
         return all_candidates
@@ -666,7 +678,7 @@ class GoldenCrossScenario(BaseScenario):
             if self.is_cancelled(): break
             self._emit_progress(f"--- Processing Market: {market} ---")
 
-            if market != 'CUSTOM':
+            if market != 'CUSTOM' and not ticker:
                 index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
                 if not index_ticker:
                     processed_tickers += len(tickers)
@@ -702,6 +714,10 @@ class GoldenCrossScenario(BaseScenario):
                 recent_data = stock_data.tail(self.recency_days + 1)
                 if len(recent_data) < 2: continue
 
+                cross_found = False
+                days_ago = -1
+                score = 0
+
                 for i in range(len(recent_data) - 1, 0, -1):
                     today = recent_data.iloc[i]
                     yesterday = recent_data.iloc[i - 1]
@@ -714,23 +730,26 @@ class GoldenCrossScenario(BaseScenario):
                             days_ago = len(recent_data) - 1 - i
                             self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate (cross {days_ago} days ago)!")
                             score = self._calculate_score(days_ago)
-
-                            candidate = ReboundCandidate(
-                                ticker=ticker_val,
-                                scenario=self.name,
-                                score=score,
-                                history_df=stock_data,
-                                technicals={
-                                    'price': round(stock_data.iloc[-1]['Close'], 2),
-                                    'cross_days_ago': days_ago,
-                                    'sma_50': round(today['SMA50'], 2),
-                                    'sma_200': round(today['SMA200'], 2),
-                                },
-                                fundamentals={'name': stock_info.get('shortName', 'N/A')}
-                            )
-                            all_candidates.append(candidate)
-                            # Found the most recent cross, no need to look further back for this ticker
+                            cross_found = True
                             break
+
+                if not cross_found and not ticker:
+                    continue
+
+                candidate = ReboundCandidate(
+                    ticker=ticker_val,
+                    scenario=self.name,
+                    score=score,
+                    history_df=stock_data,
+                    technicals={
+                        'price': round(stock_data.iloc[-1]['Close'], 2),
+                        'cross_days_ago': days_ago if cross_found else 'N/A',
+                        'sma_50': round(stock_data.iloc[-1]['SMA50'], 2),
+                        'sma_200': round(stock_data.iloc[-1]['SMA200'], 2),
+                    },
+                    fundamentals={'name': stock_info.get('shortName', 'N/A')}
+                )
+                all_candidates.append(candidate)
 
         self._emit_progress(f"Scan complete. Found {len(all_candidates)} candidates.")
         return all_candidates
@@ -799,34 +818,39 @@ class HighQualityDividendScenario(BaseScenario):
             payout = fund_data.get('payoutRatio')
             debt = fund_data.get('debtToEquity')
 
+            is_candidate = False
+            score = 0
+
             # Ensure all required data points are present and valid
-            if not all(v is not None for v in [div_yield, payout, debt]):
+            if all(v is not None for v in [div_yield, payout, debt]):
+                # Apply the quality filters
+                if div_yield >= self.min_yield and \
+                   0 < payout < self.max_payout_ratio and \
+                   debt < self.max_debt_to_equity:
+
+                    self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
+                    score = self._calculate_score(div_yield, debt)
+                    is_candidate = True
+
+            if not is_candidate and not ticker:
                 continue
 
-            # Apply the quality filters
-            if div_yield >= self.min_yield and \
-               0 < payout < self.max_payout_ratio and \
-               debt < self.max_debt_to_equity:
+            # We need historical data just for the chart, fetch it now
+            stock_data = data_loader.get_stock_data(ticker_val)
+            stock_info = get_ticker_info_cached(ticker_val)
+            fund_data['name'] = stock_info.get('shortName', 'N/A')
 
-                self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
-                score = self._calculate_score(div_yield, debt)
-
-                # We need historical data just for the chart, fetch it now
-                stock_data = data_loader.get_stock_data(ticker_val)
-                stock_info = get_ticker_info_cached(ticker_val)
-                fund_data['name'] = stock_info.get('shortName', 'N/A')
-
-                candidate = ReboundCandidate(
-                    ticker=ticker_val,
-                    scenario=self.name,
-                    score=score,
-                    history_df=stock_data,
-                    technicals={
-                        'price': round(stock_data['Close'].iloc[-1], 2) if not stock_data.empty else 'N/A',
-                    },
-                    fundamentals=fund_data
-                )
-                all_candidates.append(candidate)
+            candidate = ReboundCandidate(
+                ticker=ticker_val,
+                scenario=self.name,
+                score=score,
+                history_df=stock_data,
+                technicals={
+                    'price': round(stock_data['Close'].iloc[-1], 2) if not stock_data.empty else 'N/A',
+                },
+                fundamentals=fund_data
+            )
+            all_candidates.append(candidate)
 
         self._emit_progress(f"Scan complete. Found {len(all_candidates)} candidates.")
         return all_candidates
@@ -1010,6 +1034,8 @@ class FundamentalDivergenceScenario(BaseScenario):
             fund_data = fundamental_data.get(ticker_val)
             if not fund_data: continue
 
+            is_candidate = True
+
             # --- (A) Initial Fundamental Filter ---
             # The D/E ratio is now pre-corrected in the FundamentalFetcher.
             d2e = fund_data.get('debtToEquity')
@@ -1018,7 +1044,7 @@ class FundamentalDivergenceScenario(BaseScenario):
                     fund_data.get('earningsGrowth') is not None and fund_data.get('earningsGrowth', -1) >= 0 and
                     fund_data.get('freeCashflow') is not None and fund_data.get('freeCashflow', -1) > 0 and
                     d2e is not None and 0 < d2e < config.FD_MAX_DEBT_TO_EQUITY):
-                continue
+                is_candidate = False
 
             stock_data = data_loader.get_stock_data(ticker_val)
             if stock_data is None or len(stock_data) < self.scan_period: continue
@@ -1050,7 +1076,7 @@ class FundamentalDivergenceScenario(BaseScenario):
             relative_perf = stock_perf - index_perf
 
             if relative_perf > 0.05: # Allow for slight outperformance (5%) as per scoring
-                continue
+                is_candidate = False
 
             # --- Passed all filters, now calculate score ---
             technicals_for_score = {
@@ -1061,26 +1087,31 @@ class FundamentalDivergenceScenario(BaseScenario):
 
             score, score_breakdown = self._calculate_score(fund_data, technicals_for_score)
 
-            if score >= config.FD_MIN_SCORE:
-                self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate with score {score}!")
-                stock_info = get_ticker_info_cached(ticker_val)
-                fund_data['name'] = stock_info.get('shortName', 'N/A')
+            if score < config.FD_MIN_SCORE:
+                is_candidate = False
 
-                candidate = ReboundCandidate(
-                    ticker=ticker_val,
-                    scenario=self.name,
-                    score=score,
-                    history_df=stock_data,
-                    technicals={
-                        'price': round(latest['Close'], 2),
-                        'price_range_120d_pct': round(price_range_120d * 100, 2) if price_range_120d != 999 else 'N/A',
-                        'sma50_vs_sma200_pct': round(sma_diff_pct * 100, 2),
-                        'relative_perf_vs_index_pct': round(relative_perf * 100, 2),
-                        **score_breakdown
-                    },
-                    fundamentals=fund_data
-                )
-                all_candidates.append(candidate)
+            if not is_candidate and not ticker:
+                continue
+
+            self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate with score {score}!")
+            stock_info = get_ticker_info_cached(ticker_val)
+            fund_data['name'] = stock_info.get('shortName', 'N/A')
+
+            candidate = ReboundCandidate(
+                ticker=ticker_val,
+                scenario=self.name,
+                score=score if is_candidate else 0,
+                history_df=stock_data,
+                technicals={
+                    'price': round(latest['Close'], 2),
+                    'price_range_120d_pct': round(price_range_120d * 100, 2) if price_range_120d != 999 else 'N/A',
+                    'sma50_vs_sma200_pct': round(sma_diff_pct * 100, 2),
+                    'relative_perf_vs_index_pct': round(relative_perf * 100, 2),
+                    **score_breakdown
+                },
+                fundamentals=fund_data
+            )
+            all_candidates.append(candidate)
 
         self._emit_progress(f"Scan complete. Found {len(all_candidates)} candidates.")
         return all_candidates
@@ -1124,7 +1155,7 @@ class QualityPullbackScenario(BaseScenario):
                 break
             self._emit_progress(f"--- Processing Market: {market} ---")
 
-            if market != 'CUSTOM':
+            if market != 'CUSTOM' and not ticker:
                 index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
                 if not index_ticker:
                     self._emit_progress(f"No index ticker for market '{market}'. Skipping.")
@@ -1164,9 +1195,13 @@ class QualityPullbackScenario(BaseScenario):
                         ticker_info_cache[ticker_val]['stock_data'] = stock_data
                         technically_strong_tickers.append(ticker_val)
 
-            if not technically_strong_tickers:
+            if not technically_strong_tickers and not ticker:
                 self._emit_progress("No technically strong tickers found in this market.")
                 continue
+
+            if ticker and not technically_strong_tickers:
+                technically_strong_tickers.append(ticker)
+
 
             # --- Phase 2: Fundamental Data Fetching ---
             def fundamental_progress_callback(message: str):
@@ -1198,6 +1233,9 @@ class QualityPullbackScenario(BaseScenario):
                     if score >= 2:
                         fundamentally_strong_tickers[ticker_val] = data
 
+            if ticker and not fundamentally_strong_tickers:
+                fundamentally_strong_tickers[ticker] = {}
+
             if not fundamentally_strong_tickers:
                 self._emit_progress("No fundamentally strong tickers found in this market.")
                 continue
@@ -1217,6 +1255,9 @@ class QualityPullbackScenario(BaseScenario):
                 latest = stock_data.iloc[-1]
                 current_price, sma50 = latest['Close'], latest['SMA50']
 
+                is_candidate = False
+                score = 0
+
                 if pd.notna(current_price) and pd.notna(sma50) and sma50 > 0:
                     dist_to_sma50 = abs((current_price - sma50) / sma50) * 100
                     if dist_to_sma50 <= 3.0:
@@ -1224,19 +1265,24 @@ class QualityPullbackScenario(BaseScenario):
                         prox_score = 100 - (dist_to_sma50 / 3.0 * 100)
                         fund_strength = (fund_data.get('earningsGrowth', 0) * 100)
                         score = int(0.7 * prox_score + 0.3 * fund_strength)
-                        fund_data['name'] = ticker_info_cache.get(ticker_val, {}).get('shortName', 'N/A')
-                        candidate = ReboundCandidate(
-                            ticker=ticker_val, scenario=self.name, score=min(100, score),
-                            history_df=stock_data,
-                            technicals={
-                                'price': round(current_price, 2),
-                                'rsi': round(latest['RSI'], 2),
-                                '50_sma_value': round(sma50, 2),
-                                'dist_sma_50': round(dist_to_sma50, 2)
-                            },
-                            fundamentals=fund_data
-                        )
-                        all_candidates.append(candidate)
+                        is_candidate = True
+
+                if not is_candidate and not ticker:
+                    continue
+
+                fund_data['name'] = ticker_info_cache.get(ticker_val, {}).get('shortName', 'N/A')
+                candidate = ReboundCandidate(
+                    ticker=ticker_val, scenario=self.name, score=min(100, score) if is_candidate else 0,
+                    history_df=stock_data,
+                    technicals={
+                        'price': round(current_price, 2),
+                        'rsi': round(latest['RSI'], 2),
+                        '50_sma_value': round(sma50, 2),
+                        'dist_sma_50': round(dist_to_sma50, 2)
+                    },
+                    fundamentals=fund_data
+                )
+                all_candidates.append(candidate)
 
         self._emit_progress(f"Scan complete. Found {len(all_candidates)} candidates.")
         self._emit_percent(100)

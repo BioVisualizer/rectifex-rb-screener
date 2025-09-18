@@ -115,9 +115,11 @@ class PandasModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.BackgroundRole:
             score = self._data.iloc[row]["Score"]
             if score > 80:
-                return QColor("#d4edda")
+                return QColor("#d4edda") # Green
             elif score > 60:
-                return QColor("#fff3cd")
+                return QColor("#fff3cd") # Yellow
+            elif score == 0:
+                return QColor("#f8d7da") # Red
 
         if role == Qt.ItemDataRole.ToolTipRole and column_name == "Score":
             base_tooltip = "Overall score (0-100) that rates the rebound potential. Higher is better."
