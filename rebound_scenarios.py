@@ -161,7 +161,7 @@ class BaseScenario(ABC):
                 self.progress_percent_callback(percent)
 
     @abstractmethod
-    async def run(self) -> List[ReboundCandidate]:
+    async def run(self, ticker: str = None) -> List[ReboundCandidate]:
         """The main execution method for the scenario."""
         pass
 
@@ -228,9 +228,12 @@ class ClassicOversoldScenario(BaseScenario):
         final_score = int((0.6 * rsi_score) + (0.4 * proximity_score))
         return final_score, rsi_score, proximity_score
 
-    async def run(self) -> List[ReboundCandidate]:
+    async def run(self, ticker: str = None) -> List[ReboundCandidate]:
         self._emit_progress(f"Starting '{self.name}' scan...")
-        all_tickers = data_loader.get_all_tickers()
+        if ticker:
+            all_tickers = {"CUSTOM": [ticker]}
+        else:
+            all_tickers = data_loader.get_all_tickers()
         all_candidates = []
         total_tickers = sum(len(t) for t in all_tickers.values())
         processed_tickers = 0
@@ -261,19 +264,19 @@ class ClassicOversoldScenario(BaseScenario):
                 self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
             else:
                 self._emit_progress(f"Processing custom ticker list. Analyzing {len(tickers)} tickers.")
-            for ticker in tickers:
+            for ticker_val in tickers:
                 if self.is_cancelled():
                     self._emit_progress("Scan cancelled by user.")
                     break
                 processed_tickers += 1
                 self._emit_percent(int((processed_tickers / total_tickers) * 100))
-                self._emit_progress(f"Analyzing [{processed_tickers}/{total_tickers}] {ticker}")
+                self._emit_progress(f"Analyzing [{processed_tickers}/{total_tickers}] {ticker_val}")
 
-                stock_info = get_ticker_info_cached(ticker)
+                stock_info = get_ticker_info_cached(ticker_val)
                 if not passes_liquidity_filter(stock_info):
                     continue
 
-                stock_data = data_loader.get_stock_data(ticker)
+                stock_data = data_loader.get_stock_data(ticker_val)
                 if stock_data is None or stock_data.empty or len(stock_data) < config.SMA_SUPPORT_PERIOD:
                     continue
 
@@ -282,11 +285,11 @@ class ClassicOversoldScenario(BaseScenario):
                 if not is_candidate:
                     continue
 
-                self._emit_progress(f"!!! {ticker} is a potential '{self.name}' candidate!")
+                self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
                 score, rsi_score, prox_score = self._calculate_score(rsi, dist_sma, dist_low)
 
                 candidate = ReboundCandidate(
-                    ticker=ticker,
+                    ticker=ticker_val,
                     scenario=self.name,
                     score=score,
                     history_df=stock_data,
@@ -331,9 +334,12 @@ class MeanReversionScenario(BaseScenario):
         final_score = int((score_percent / 5.0) * 100)
         return max(0, min(100, final_score))
 
-    async def run(self) -> List[ReboundCandidate]:
+    async def run(self, ticker: str = None) -> List[ReboundCandidate]:
         self._emit_progress(f"Starting '{self.name}' scan...")
-        all_tickers = data_loader.get_all_tickers()
+        if ticker:
+            all_tickers = {"CUSTOM": [ticker]}
+        else:
+            all_tickers = data_loader.get_all_tickers()
         all_candidates = []
         total_tickers = sum(len(t) for t in all_tickers.values())
         processed_tickers = 0
@@ -362,16 +368,16 @@ class MeanReversionScenario(BaseScenario):
                 self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
             else:
                 self._emit_progress(f"Processing custom ticker list. Analyzing {len(tickers)} tickers.")
-            for ticker in tickers:
+            for ticker_val in tickers:
                 if self.is_cancelled(): break
                 processed_tickers += 1
                 self._emit_percent(int((processed_tickers / total_tickers) * 100))
-                self._emit_progress(f"Analyzing [{processed_tickers}/{total_tickers}] {ticker}")
+                self._emit_progress(f"Analyzing [{processed_tickers}/{total_tickers}] {ticker_val}")
 
-                stock_info = get_ticker_info_cached(ticker)
+                stock_info = get_ticker_info_cached(ticker_val)
                 if not passes_liquidity_filter(stock_info): continue
 
-                stock_data = data_loader.get_stock_data(ticker)
+                stock_data = data_loader.get_stock_data(ticker_val)
                 if stock_data is None or stock_data.empty or len(stock_data) < 20: continue
 
                 stock_data = self._prepare_dataframe(stock_data)
@@ -387,11 +393,11 @@ class MeanReversionScenario(BaseScenario):
                 if current_price <= lower_band:
                     percent_below_band = ((lower_band - current_price) / current_price) * 100
 
-                    self._emit_progress(f"!!! {ticker} is a potential '{self.name}' candidate!")
+                    self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
                     score = self._calculate_score(percent_below_band)
 
                     candidate = ReboundCandidate(
-                        ticker=ticker,
+                        ticker=ticker_val,
                         scenario=self.name,
                         score=score,
                         history_df=stock_data,
@@ -442,9 +448,12 @@ class VolatilitySqueezeScenario(BaseScenario):
         score = 100 - (proximity / 0.1 * 100)
         return int(max(0, min(100, score)))
 
-    async def run(self) -> List[ReboundCandidate]:
+    async def run(self, ticker: str = None) -> List[ReboundCandidate]:
         self._emit_progress(f"Starting '{self.name}' scan...")
-        all_tickers = data_loader.get_all_tickers()
+        if ticker:
+            all_tickers = {"CUSTOM": [ticker]}
+        else:
+            all_tickers = data_loader.get_all_tickers()
         all_candidates = []
         total_tickers = sum(len(t) for t in all_tickers.values())
         processed_tickers = 0
@@ -455,16 +464,16 @@ class VolatilitySqueezeScenario(BaseScenario):
             if self.is_cancelled(): break
             self._emit_progress(f"--- Processing Market: {market} ---")
 
-            for ticker in tickers:
+            for ticker_val in tickers:
                 if self.is_cancelled(): break
                 processed_tickers += 1
                 self._emit_percent(int((processed_tickers / total_tickers) * 100))
-                self._emit_progress(f"Analyzing [{processed_tickers}/{total_tickers}] {ticker}")
+                self._emit_progress(f"Analyzing [{processed_tickers}/{total_tickers}] {ticker_val}")
 
-                stock_info = get_ticker_info_cached(ticker)
+                stock_info = get_ticker_info_cached(ticker_val)
                 if not passes_liquidity_filter(stock_info): continue
 
-                stock_data = data_loader.get_stock_data(ticker)
+                stock_data = data_loader.get_stock_data(ticker_val)
                 if stock_data is None or len(stock_data) < self.squeeze_period: continue
 
                 stock_data = self._prepare_dataframe(stock_data)
@@ -478,11 +487,11 @@ class VolatilitySqueezeScenario(BaseScenario):
                     continue
 
                 if current_width <= min_width * 1.1: # Signal: within 10% of the low
-                    self._emit_progress(f"!!! {ticker} is a potential '{self.name}' candidate!")
+                    self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
                     score = self._calculate_score(current_width, min_width)
 
                     candidate = ReboundCandidate(
-                        ticker=ticker,
+                        ticker=ticker_val,
                         scenario=self.name,
                         score=score,
                         history_df=stock_data,
@@ -531,9 +540,12 @@ class MomentumBreakoutScenario(BaseScenario):
         final_score = int(0.6 * volume_score + 0.4 * strength_score)
         return final_score
 
-    async def run(self) -> List[ReboundCandidate]:
+    async def run(self, ticker: str = None) -> List[ReboundCandidate]:
         self._emit_progress(f"Starting '{self.name}' scan...")
-        all_tickers = data_loader.get_all_tickers()
+        if ticker:
+            all_tickers = {"CUSTOM": [ticker]}
+        else:
+            all_tickers = data_loader.get_all_tickers()
         all_candidates = []
         total_tickers = sum(len(t) for t in all_tickers.values())
         processed_tickers = 0
@@ -562,16 +574,16 @@ class MomentumBreakoutScenario(BaseScenario):
                 self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
             else:
                 self._emit_progress(f"Processing custom ticker list. Analyzing {len(tickers)} tickers.")
-            for ticker in tickers:
+            for ticker_val in tickers:
                 if self.is_cancelled(): break
                 processed_tickers += 1
                 self._emit_percent(int((processed_tickers / total_tickers) * 100))
-                self._emit_progress(f"Analyzing [{processed_tickers}/{total_tickers}] {ticker}")
+                self._emit_progress(f"Analyzing [{processed_tickers}/{total_tickers}] {ticker_val}")
 
-                stock_info = get_ticker_info_cached(ticker)
+                stock_info = get_ticker_info_cached(ticker_val)
                 if not passes_liquidity_filter(stock_info): continue
 
-                stock_data = data_loader.get_stock_data(ticker)
+                stock_data = data_loader.get_stock_data(ticker_val)
                 if stock_data is None or len(stock_data) < self.breakout_period: continue
 
                 stock_data = self._prepare_dataframe(stock_data)
@@ -588,13 +600,13 @@ class MomentumBreakoutScenario(BaseScenario):
 
                 # Signal: Price breaks above the 52-week high on high volume
                 if current_price > high_52w and current_volume > avg_volume * 1.5:
-                    self._emit_progress(f"!!! {ticker} is a potential '{self.name}' candidate!")
+                    self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
                     volume_ratio = current_volume / avg_volume
                     breakout_pct = ((current_price - high_52w) / high_52w) * 100
                     score = self._calculate_score(volume_ratio, breakout_pct)
 
                     candidate = ReboundCandidate(
-                        ticker=ticker,
+                        ticker=ticker_val,
                         scenario=self.name,
                         score=score,
                         history_df=stock_data,
@@ -637,9 +649,12 @@ class GoldenCrossScenario(BaseScenario):
         score = 100 - (days_ago * 20)
         return max(0, score)
 
-    async def run(self) -> List[ReboundCandidate]:
+    async def run(self, ticker: str = None) -> List[ReboundCandidate]:
         self._emit_progress(f"Starting '{self.name}' scan...")
-        all_tickers = data_loader.get_all_tickers()
+        if ticker:
+            all_tickers = {"CUSTOM": [ticker]}
+        else:
+            all_tickers = data_loader.get_all_tickers()
         all_candidates = []
         total_tickers = sum(len(t) for t in all_tickers.values())
         processed_tickers = 0
@@ -668,16 +683,16 @@ class GoldenCrossScenario(BaseScenario):
                 self._emit_progress(f"Market context for {market} is bullish. Analyzing {len(tickers)} tickers.")
             else:
                 self._emit_progress(f"Processing custom ticker list. Analyzing {len(tickers)} tickers.")
-            for ticker in tickers:
+            for ticker_val in tickers:
                 if self.is_cancelled(): break
                 processed_tickers += 1
                 self._emit_percent(int((processed_tickers / total_tickers) * 100))
-                self._emit_progress(f"Analyzing [{processed_tickers}/{total_tickers}] {ticker}")
+                self._emit_progress(f"Analyzing [{processed_tickers}/{total_tickers}] {ticker_val}")
 
-                stock_info = get_ticker_info_cached(ticker)
+                stock_info = get_ticker_info_cached(ticker_val)
                 if not passes_liquidity_filter(stock_info): continue
 
-                stock_data = data_loader.get_stock_data(ticker)
+                stock_data = data_loader.get_stock_data(ticker_val)
                 if stock_data is None or len(stock_data) < self.min_data_days: continue
 
                 stock_data = self._prepare_dataframe(stock_data)
@@ -697,11 +712,11 @@ class GoldenCrossScenario(BaseScenario):
                         # Check for the cross condition
                         if today['SMA50'] > today['SMA200'] and yesterday['SMA50'] <= yesterday['SMA200']:
                             days_ago = len(recent_data) - 1 - i
-                            self._emit_progress(f"!!! {ticker} is a potential '{self.name}' candidate (cross {days_ago} days ago)!")
+                            self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate (cross {days_ago} days ago)!")
                             score = self._calculate_score(days_ago)
 
                             candidate = ReboundCandidate(
-                                ticker=ticker,
+                                ticker=ticker_val,
                                 scenario=self.name,
                                 score=score,
                                 history_df=stock_data,
@@ -743,9 +758,12 @@ class HighQualityDividendScenario(BaseScenario):
         final_score = int(0.6 * yield_score + 0.4 * debt_score)
         return max(0, min(100, final_score))
 
-    async def run(self) -> List[ReboundCandidate]:
+    async def run(self, ticker: str = None) -> List[ReboundCandidate]:
         self._emit_progress(f"Starting '{self.name}' scan...")
-        all_tickers_by_market = data_loader.get_all_tickers()
+        if ticker:
+            all_tickers_by_market = {"CUSTOM": [ticker]}
+        else:
+            all_tickers_by_market = data_loader.get_all_tickers()
         all_candidates = []
 
         # This scan is fundamental, so we first gather all liquid tickers
@@ -753,11 +771,11 @@ class HighQualityDividendScenario(BaseScenario):
         self._emit_progress("Step 1: Filtering for liquid tickers...")
         for market, tickers in all_tickers_by_market.items():
             if self.is_cancelled(): break
-            for ticker in tickers:
+            for ticker_val in tickers:
                 if self.is_cancelled(): break
-                stock_info = get_ticker_info_cached(ticker)
+                stock_info = get_ticker_info_cached(ticker_val)
                 if passes_liquidity_filter(stock_info):
-                    liquid_tickers.append(ticker)
+                    liquid_tickers.append(ticker_val)
 
         if self.is_cancelled(): return []
 
@@ -771,7 +789,7 @@ class HighQualityDividendScenario(BaseScenario):
         if self.is_cancelled(): return []
 
         self._emit_progress(f"Step 3: Analyzing {len(fundamental_data)} tickers for dividend quality...")
-        for i, (ticker, fund_data) in enumerate(fundamental_data.items()):
+        for i, (ticker_val, fund_data) in enumerate(fundamental_data.items()):
             if self.is_cancelled(): break
             self._emit_percent(int(((i + 1) / len(fundamental_data)) * 100))
 
@@ -790,16 +808,16 @@ class HighQualityDividendScenario(BaseScenario):
                0 < payout < self.max_payout_ratio and \
                debt < self.max_debt_to_equity:
 
-                self._emit_progress(f"!!! {ticker} is a potential '{self.name}' candidate!")
+                self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
                 score = self._calculate_score(div_yield, debt)
 
                 # We need historical data just for the chart, fetch it now
-                stock_data = data_loader.get_stock_data(ticker)
-                stock_info = get_ticker_info_cached(ticker)
+                stock_data = data_loader.get_stock_data(ticker_val)
+                stock_info = get_ticker_info_cached(ticker_val)
                 fund_data['name'] = stock_info.get('shortName', 'N/A')
 
                 candidate = ReboundCandidate(
-                    ticker=ticker,
+                    ticker=ticker_val,
                     scenario=self.name,
                     score=score,
                     history_df=stock_data,
@@ -932,9 +950,12 @@ class FundamentalDivergenceScenario(BaseScenario):
 
         return int(score), breakdown
 
-    async def run(self) -> List[ReboundCandidate]:
+    async def run(self, ticker: str = None) -> List[ReboundCandidate]:
         self._emit_progress(f"Starting '{self.name}' scan...")
-        all_tickers_by_market = data_loader.get_all_tickers()
+        if ticker:
+            all_tickers_by_market = {"CUSTOM": [ticker]}
+        else:
+            all_tickers_by_market = data_loader.get_all_tickers()
         all_candidates = []
 
         # This scan is fundamental, so we first gather all liquid tickers
@@ -945,14 +966,14 @@ class FundamentalDivergenceScenario(BaseScenario):
 
         for market, tickers in all_tickers_by_market.items():
             if self.is_cancelled(): break
-            for ticker in tickers:
+            for ticker_val in tickers:
                 if self.is_cancelled(): break
                 processed_tickers_count += 1
                 # Progress for liquidity filter is minimal, maybe up to 10%
                 self._emit_percent(int((processed_tickers_count / total_tickers_all_markets) * 10))
-                stock_info = get_ticker_info_cached(ticker)
+                stock_info = get_ticker_info_cached(ticker_val)
                 if passes_liquidity_filter(stock_info):
-                    liquid_tickers.append((ticker, market))
+                    liquid_tickers.append((ticker_val, market))
 
         if self.is_cancelled(): return []
 
@@ -979,14 +1000,14 @@ class FundamentalDivergenceScenario(BaseScenario):
         analysis_total = len(liquid_tickers)
         analysis_processed = 0
 
-        for ticker, market in liquid_tickers:
+        for ticker_val, market in liquid_tickers:
             if self.is_cancelled(): break
             analysis_processed += 1
             # Progress for analysis is 40% -> 100%
             self._emit_percent(40 + int((analysis_processed / analysis_total) * 60))
-            self._emit_progress(f"Analyzing [{analysis_processed}/{analysis_total}] {ticker}")
+            self._emit_progress(f"Analyzing [{analysis_processed}/{analysis_total}] {ticker_val}")
 
-            fund_data = fundamental_data.get(ticker)
+            fund_data = fundamental_data.get(ticker_val)
             if not fund_data: continue
 
             # --- (A) Initial Fundamental Filter ---
@@ -999,7 +1020,7 @@ class FundamentalDivergenceScenario(BaseScenario):
                     d2e is not None and 0 < d2e < config.FD_MAX_DEBT_TO_EQUITY):
                 continue
 
-            stock_data = data_loader.get_stock_data(ticker)
+            stock_data = data_loader.get_stock_data(ticker_val)
             if stock_data is None or len(stock_data) < self.scan_period: continue
 
             stock_data = self._prepare_dataframe(stock_data)
@@ -1041,12 +1062,12 @@ class FundamentalDivergenceScenario(BaseScenario):
             score, score_breakdown = self._calculate_score(fund_data, technicals_for_score)
 
             if score >= config.FD_MIN_SCORE:
-                self._emit_progress(f"!!! {ticker} is a potential '{self.name}' candidate with score {score}!")
-                stock_info = get_ticker_info_cached(ticker)
+                self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate with score {score}!")
+                stock_info = get_ticker_info_cached(ticker_val)
                 fund_data['name'] = stock_info.get('shortName', 'N/A')
 
                 candidate = ReboundCandidate(
-                    ticker=ticker,
+                    ticker=ticker_val,
                     scenario=self.name,
                     score=score,
                     history_df=stock_data,
@@ -1081,9 +1102,12 @@ class QualityPullbackScenario(BaseScenario):
         df['SMA200'] = calculate_sma(df['Close'], config.SMA_SUPPORT_PERIOD)
         return df
 
-    async def run(self) -> List[ReboundCandidate]:
+    async def run(self, ticker: str = None) -> List[ReboundCandidate]:
         self._emit_progress(f"Starting '{self.name}' scan...")
-        all_tickers_by_market = data_loader.get_all_tickers()
+        if ticker:
+            all_tickers_by_market = {"CUSTOM": [ticker]}
+        else:
+            all_tickers_by_market = data_loader.get_all_tickers()
         all_candidates = []
 
         index_data_cache = {}
@@ -1116,19 +1140,19 @@ class QualityPullbackScenario(BaseScenario):
             technically_strong_tickers = []
             self._emit_progress("Phase 1/3: Applying technical filters...")
             total_tickers_in_market = len(tickers)
-            for i, ticker in enumerate(tickers):
+            for i, ticker_val in enumerate(tickers):
                 if self.is_cancelled(): break
 
                 progress_pct = int(((i + 1) / total_tickers_in_market) * 40)
                 self._emit_percent(progress_pct)
-                self._emit_progress(f"Phase 1/3: Tech Filter ({i+1}/{total_tickers_in_market}) - {ticker}")
+                self._emit_progress(f"Phase 1/3: Tech Filter ({i+1}/{total_tickers_in_market}) - {ticker_val}")
 
-                stock_info = get_ticker_info_cached(ticker)
+                stock_info = get_ticker_info_cached(ticker_val)
                 if not passes_liquidity_filter(stock_info):
                     continue
-                ticker_info_cache[ticker] = stock_info
+                ticker_info_cache[ticker_val] = stock_info
 
-                stock_data = data_loader.get_stock_data(ticker)
+                stock_data = data_loader.get_stock_data(ticker_val)
                 if stock_data is None or len(stock_data) < 200:
                     continue
 
@@ -1137,8 +1161,8 @@ class QualityPullbackScenario(BaseScenario):
 
                 if pd.notna(latest['Close']) and pd.notna(latest['SMA50']) and pd.notna(latest['SMA200']):
                     if latest['Close'] > latest['SMA200'] and latest['SMA50'] > latest['SMA200']:
-                        ticker_info_cache[ticker]['stock_data'] = stock_data
-                        technically_strong_tickers.append(ticker)
+                        ticker_info_cache[ticker_val]['stock_data'] = stock_data
+                        technically_strong_tickers.append(ticker_val)
 
             if not technically_strong_tickers:
                 self._emit_progress("No technically strong tickers found in this market.")
@@ -1162,7 +1186,7 @@ class QualityPullbackScenario(BaseScenario):
             )
 
             fundamentally_strong_tickers = {}
-            for ticker, data in fundamental_data.items():
+            for ticker_val, data in fundamental_data.items():
                 if data:
                     score = 0
                     eps_growth = data.get('earningsGrowth')
@@ -1172,7 +1196,7 @@ class QualityPullbackScenario(BaseScenario):
                     debt_to_equity = data.get('debtToEquity')
                     if debt_to_equity is not None and debt_to_equity < 0.7: score += 1
                     if score >= 2:
-                        fundamentally_strong_tickers[ticker] = data
+                        fundamentally_strong_tickers[ticker_val] = data
 
             if not fundamentally_strong_tickers:
                 self._emit_progress("No fundamentally strong tickers found in this market.")
@@ -1181,13 +1205,13 @@ class QualityPullbackScenario(BaseScenario):
             # --- Phase 3: Final Analysis ---
             self._emit_progress(f"Phase 3/3: Final analysis of {len(fundamentally_strong_tickers)} tickers...")
             total_final_tickers = len(fundamentally_strong_tickers)
-            for i, (ticker, fund_data) in enumerate(fundamentally_strong_tickers.items()):
+            for i, (ticker_val, fund_data) in enumerate(fundamentally_strong_tickers.items()):
                 if self.is_cancelled(): break
 
                 progress_pct = 90 + int(((i + 1) / total_final_tickers) * 10)
                 self._emit_percent(progress_pct)
 
-                stock_data = ticker_info_cache.get(ticker, {}).get('stock_data')
+                stock_data = ticker_info_cache.get(ticker_val, {}).get('stock_data')
                 if stock_data is None: continue
 
                 latest = stock_data.iloc[-1]
@@ -1196,13 +1220,13 @@ class QualityPullbackScenario(BaseScenario):
                 if pd.notna(current_price) and pd.notna(sma50) and sma50 > 0:
                     dist_to_sma50 = abs((current_price - sma50) / sma50) * 100
                     if dist_to_sma50 <= 3.0:
-                        self._emit_progress(f"!!! {ticker} is a potential '{self.name}' candidate!")
+                        self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
                         prox_score = 100 - (dist_to_sma50 / 3.0 * 100)
                         fund_strength = (fund_data.get('earningsGrowth', 0) * 100)
                         score = int(0.7 * prox_score + 0.3 * fund_strength)
-                        fund_data['name'] = ticker_info_cache.get(ticker, {}).get('shortName', 'N/A')
+                        fund_data['name'] = ticker_info_cache.get(ticker_val, {}).get('shortName', 'N/A')
                         candidate = ReboundCandidate(
-                            ticker=ticker, scenario=self.name, score=min(100, score),
+                            ticker=ticker_val, scenario=self.name, score=min(100, score),
                             history_df=stock_data,
                             technicals={
                                 'price': round(current_price, 2),
@@ -1249,7 +1273,7 @@ class ScenarioRunner:
         """Returns a list of the names of available scenarios."""
         return list(ScenarioRunner.SCENARIOS.keys())
 
-    async def run_scenario(self, scenario_name: str) -> List[ReboundCandidate]:
+    async def run_scenario(self, scenario_name: str, ticker: str = None) -> List[ReboundCandidate]:
         """
         Runs the specified scenario by name.
         """
@@ -1272,7 +1296,7 @@ class ScenarioRunner:
                 self.progress_callback.emit(message)
 
         try:
-            return await scenario_instance.run()
+            return await scenario_instance.run(ticker=ticker)
         except Exception as e:
             logging.error(f"An error occurred during the '{scenario_name}' scan: {e}", exc_info=True)
             _emit_progress_helper(f"Error during scan: {e}")
