@@ -613,7 +613,6 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"Scan Error: {value}")
         self.scan_button.setEnabled(True)
         self.single_ticker_scan_button.setEnabled(True)
-        self.single_ticker_scan_button.setEnabled(True)
         self.stop_scan_button.hide()
         self.stop_scan_button.setEnabled(False)
         self.clear_cache_button.setEnabled(True)
@@ -637,6 +636,7 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"Scan complete. Found {len(results)} candidates.")
 
         self.scan_button.setEnabled(True)
+        self.single_ticker_scan_button.setEnabled(True)
         self.stop_scan_button.hide()
         self.stop_scan_button.setEnabled(False)
         self.clear_cache_button.setEnabled(True)
