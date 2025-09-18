@@ -41,10 +41,11 @@ class WorkerSignals(QObject):
 
 class AnalysisWorker(QObject):
     """Worker thread for running the stock analysis to prevent GUI freezing."""
-    def __init__(self, selected_scenario: str):
+    def __init__(self, selected_scenario: str, ticker: str = None):
         super().__init__()
         self.signals = WorkerSignals()
         self.selected_scenario = selected_scenario
+        self.ticker = ticker
         self._is_cancelled = False
 
     def cancel(self):
@@ -64,7 +65,7 @@ class AnalysisWorker(QObject):
             )
 
             # Run the selected scenario using the new generic method
-            results = asyncio.run(runner.run_scenario(self.selected_scenario))
+            results = asyncio.run(runner.run_scenario(self.selected_scenario, ticker=self.ticker))
             self.signals.result.emit(results)
         except Exception as e:
             import traceback
@@ -478,6 +479,16 @@ class MainWindow(QMainWindow):
         search_layout.addWidget(self.search_input)
         main_layout.addLayout(search_layout)
 
+        # Add single ticker scan controls
+        single_ticker_layout = QHBoxLayout()
+        single_ticker_layout.addWidget(QLabel("Single Ticker Scan:"))
+        self.single_ticker_input = QLineEdit()
+        self.single_ticker_input.setPlaceholderText("Enter a single ticker (e.g., AAPL)")
+        self.single_ticker_scan_button = QPushButton("Scan Ticker")
+        single_ticker_layout.addWidget(self.single_ticker_input)
+        single_ticker_layout.addWidget(self.single_ticker_scan_button)
+        main_layout.addLayout(single_ticker_layout)
+
         self.table_view = QTableView()
         self.table_view.setSortingEnabled(True)
         main_layout.addWidget(self.table_view)
@@ -490,7 +501,8 @@ class MainWindow(QMainWindow):
         self.progress_bar.hide()
 
         # --- Connections ---
-        self.scan_button.clicked.connect(self.start_scan)
+        self.scan_button.clicked.connect(self.start_full_scan)
+        self.single_ticker_scan_button.clicked.connect(self.start_single_ticker_scan)
         self.stop_scan_button.clicked.connect(self.stop_scan)
         self.clear_cache_button.clicked.connect(self.clear_cache)
         self.manage_tickers_button.clicked.connect(self.open_ticker_manager)
@@ -555,9 +567,22 @@ class MainWindow(QMainWindow):
         """
         QMessageBox.about(self, f"About {config.APP_NAME}", about_text)
 
-    def start_scan(self):
+    def start_full_scan(self):
+        """Starts a full scan for all tickers."""
+        self.start_scan()
+
+    def start_single_ticker_scan(self):
+        """Starts a scan for a single, specified ticker."""
+        ticker = self.single_ticker_input.text().strip().upper()
+        if not ticker:
+            QMessageBox.warning(self, "Input Error", "Please enter a ticker to scan.")
+            return
+        self.start_scan(ticker=ticker)
+
+    def start_scan(self, ticker: str = None):
         """Sets up and starts the analysis worker thread."""
         self.scan_button.setEnabled(False)
+        self.single_ticker_scan_button.setEnabled(False)
         self.stop_scan_button.show()
         self.stop_scan_button.setEnabled(True)
         self.clear_cache_button.setEnabled(False)
@@ -568,7 +593,7 @@ class MainWindow(QMainWindow):
         selected_scenario = self.scenarioComboBox.currentText()
 
         self.thread = QThread()
-        self.worker = AnalysisWorker(selected_scenario=selected_scenario)
+        self.worker = AnalysisWorker(selected_scenario=selected_scenario, ticker=ticker)
         self.worker.moveToThread(self.thread)
 
         self.thread.started.connect(self.worker.run)
@@ -587,6 +612,8 @@ class MainWindow(QMainWindow):
         exctype, value, tb = error_info
         self.status_bar.showMessage(f"Scan Error: {value}")
         self.scan_button.setEnabled(True)
+        self.single_ticker_scan_button.setEnabled(True)
+        self.single_ticker_scan_button.setEnabled(True)
         self.stop_scan_button.hide()
         self.stop_scan_button.setEnabled(False)
         self.clear_cache_button.setEnabled(True)
