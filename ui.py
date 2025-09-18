@@ -385,22 +385,24 @@ class ChartWindow(QWidget):
             rsi_ax.axhline(30, color='green', linestyle='--', linewidth=0.7, alpha=0.8)
             rsi_ax.set_ylim(0, 100)
 
-            # Add info text box
+            # Add single-line info text bar between title and plot
             eps_growth = candidate.fundamentals.get('earningsGrowth')
-            eps_growth_str = f"{eps_growth * 100:.2f}%" if eps_growth is not None else "N/A"
+            eps_growth_str = f"EPS Growth: {eps_growth * 100:.2f}%" if eps_growth is not None else ""
             rev_growth = candidate.fundamentals.get('revenueGrowth')
-            rev_growth_str = f"{rev_growth * 100:.2f}%" if rev_growth is not None else "N/A"
+            rev_growth_str = f"Rev Growth: {rev_growth * 100:.2f}%" if rev_growth is not None else ""
             price = candidate.technicals.get('price')
-            price_str = f"${price:.2f}" if price is not None else "N/A"
+            price_str = f"Price: ${price:.2f}" if price is not None else ""
             rsi_val = plot_data['RSI'].iloc[-1]
-            rsi_str = f"{rsi_val:.1f}" if pd.notna(rsi_val) else "N/A"
+            rsi_str = f"RSI: {rsi_val:.1f}" if pd.notna(rsi_val) else ""
 
-            info_text = (f"Scenario: {candidate.scenario}\nPrice: {price_str}\nRSI: {rsi_str}\n"
-                         f"EPS Growth: {eps_growth_str}\nRev Growth: {rev_growth_str}")
-            price_ax.text(0.02, 0.98, info_text, transform=price_ax.transAxes, fontsize=9,
-                          verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', fc='yellow', alpha=0.5))
+            # Filter out empty strings and join with a separator
+            info_parts = [f"Scenario: {candidate.scenario}", price_str, rsi_str, eps_growth_str, rev_growth_str]
+            info_text = " | ".join(filter(None, info_parts))
 
-            self.figure.subplots_adjust(top=0.92, bottom=0.08, left=0.08, right=0.95, hspace=0.15)
+            self.figure.text(0.5, 0.94, info_text, ha='center', va='center', fontsize=8,
+                             color='#333333', bbox=dict(boxstyle='round,pad=0.4', fc='yellow', alpha=0.5, ec='none'))
+
+            self.figure.subplots_adjust(top=0.90, bottom=0.08, left=0.08, right=0.95, hspace=0.15)
             self.canvas.draw()
 
         except Exception as e:
