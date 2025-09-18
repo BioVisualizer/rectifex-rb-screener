@@ -288,6 +288,34 @@ class ChartWindow(QWidget):
 
             macd_line, signal_line, macd_hist = calculate_macd(plot_data['Close'])
 
+            # --- Fibonacci Retracement Calculation ---
+            highest_high = plot_data['High'].max()
+            lowest_low = plot_data['Low'].min()
+            fib_levels = {}
+            hlines_fib = {}
+
+            # We need a meaningful price range to draw the levels
+            if pd.notna(highest_high) and pd.notna(lowest_low) and highest_high > lowest_low:
+                price_range = highest_high - lowest_low
+                fib_levels = {
+                    23.6: highest_high - (price_range * 0.236),
+                    38.2: highest_high - (price_range * 0.382),
+                    50.0: highest_high - (price_range * 0.5),
+                    61.8: highest_high - (price_range * 0.618),
+                    78.6: highest_high - (price_range * 0.786),
+                }
+                # Also include the 0% and 100% levels for reference
+                fib_levels[0.0] = highest_high
+                fib_levels[100.0] = lowest_low
+
+                hlines_fib = dict(
+                    hlines=[level for level in fib_levels.values()],
+                    colors=['#999999'] * len(fib_levels), # A neutral grey
+                    linestyle='-.',
+                    linewidths=0.6,
+                    alpha=0.9
+                )
+
             # --- Axes Creation ---
             gs = self.figure.add_gridspec(4, 1, height_ratios=[6, 1, 2, 2], hspace=0.05)
             price_ax = self.figure.add_subplot(gs[0, 0])
@@ -319,7 +347,33 @@ class ChartWindow(QWidget):
                      mav=(50, 200),
                      addplot=add_plots,
                      style='yahoo',
-                     xrotation=20)
+                     xrotation=20,
+                     hlines=hlines_fib if hlines_fib else None)
+
+            # --- Add Fibonacci Labels ---
+            if fib_levels:
+                # Use a transform that combines data y-coords with axes x-coords
+                transform = price_ax.get_yaxis_transform()
+                # Sort levels for cleaner labeling if they overlap
+                sorted_levels = sorted(fib_levels.items(), key=lambda item: item[1], reverse=True)
+
+                last_y = float('inf')
+                for level_pct, level_price in sorted_levels:
+                    # Simple logic to avoid label overlap
+                    if abs(level_price - last_y) / (highest_high - lowest_low) < 0.035: # min 3.5% gap
+                         continue
+                    last_y = level_price
+
+                    # Place percentage on the right, price on the left, both inside the chart
+                    price_ax.text(0.98, level_price, f'{level_pct:.1f}%',
+                                  transform=transform, va='center', ha='right',
+                                  fontsize=7, color='#555555',
+                                  bbox=dict(facecolor=self.palette().window().color().name(), alpha=0.7, edgecolor='none', pad=1))
+                    price_ax.text(0.02, level_price, f'${level_price:.2f}',
+                                  transform=transform, va='center', ha='left',
+                                  fontsize=7, color='#555555',
+                                  bbox=dict(facecolor=self.palette().window().color().name(), alpha=0.7, edgecolor='none', pad=1))
+
 
             # --- Final Styling ---
             self.figure.suptitle(f'{candidate.ticker} - {candidate.scenario}', y=0.98)
