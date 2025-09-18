@@ -70,10 +70,17 @@ class FundamentalFetcher:
 
                 # Fields for multiple scenarios are fetched at once.
                 # If a field is not available for a ticker, it will be None.
+                d2e = info.get('debtToEquity')
+                # yfinance sometimes returns D/E as a percentage (e.g., 150.0) instead of a ratio (1.5).
+                # A D/E ratio over 10 is highly unusual and likely indicates this data anomaly.
+                if d2e is not None and d2e > 10:
+                    logging.info(f"Correcting anomalous D/E ratio for {ticker} from {d2e} to {d2e / 100.0}.")
+                    d2e = d2e / 100.0
+
                 required_fields = {
                     'trailingEps': info.get('trailingEps'),
                     'revenueGrowth': info.get('revenueGrowth'),
-                    'debtToEquity': info.get('debtToEquity'),
+                    'debtToEquity': d2e,
                     'earningsGrowth': info.get('earningsGrowth'),
                     'dividendYield': info.get('dividendYield'),
                     'payoutRatio': info.get('payoutRatio'),
