@@ -166,19 +166,10 @@ def get_master_ticker_list() -> list[str] | None:
 
 def get_all_tickers() -> dict[str, list[str]]:
     """
-    Gets all tickers. Prioritizes a master ticker list if it exists.
-    Otherwise, gets tickers from all configured indices, grouped by market.
+    Gets all tickers from all configured indices, grouped by market.
+    If a master ticker list exists, its tickers are added to the pool.
     Returns a dictionary mapping market -> list of unique tickers.
     """
-    # Check for master ticker list first
-    master_tickers = get_master_ticker_list()
-    if master_tickers is not None:
-        logging.info("Using master ticker list. Bypassing index-specific loading.")
-        # Return all tickers under a single generic market key
-        return {"CUSTOM": sorted(list(set(master_tickers)))}
-
-    # Fallback to original logic if no master list is found
-    logging.info("Master ticker list not found. Proceeding with index-based loading.")
     market_to_tickers = {}
     for index_name, details in config.INDICES.items():
         market = details['market']
@@ -188,6 +179,14 @@ def get_all_tickers() -> dict[str, list[str]]:
         logging.info(f"Fetching tickers for index: {index_name}")
         tickers = get_ticker_list(index_name)
         market_to_tickers[market].update(tickers)
+
+    # Check for master ticker list and add its tickers
+    master_tickers = get_master_ticker_list()
+    if master_tickers:
+        logging.info("Found master ticker list, adding its tickers to the scan.")
+        if "CUSTOM" not in market_to_tickers:
+            market_to_tickers["CUSTOM"] = set()
+        market_to_tickers["CUSTOM"].update(master_tickers)
 
     # Convert sets to lists
     return {market: sorted(list(tickers)) for market, tickers in market_to_tickers.items()}
