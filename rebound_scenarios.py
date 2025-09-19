@@ -283,11 +283,14 @@ class ClassicOversoldScenario(BaseScenario):
                 stock_data = self._prepare_dataframe(stock_data)
                 is_candidate, rsi, dist_sma, dist_low = self._check_signal(stock_data)
 
-                score = 0
+                score, rsi_score, prox_score = 0, 0, 0
                 if is_candidate:
                     self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
                     score, rsi_score, prox_score = self._calculate_score(rsi, dist_sma, dist_low)
-                elif not ticker:
+
+                # For a full scan, we only want actual candidates.
+                # For a single ticker scan, we always want a result, even with a score of 0.
+                if not is_candidate and not ticker:
                     continue
 
                 candidate = ReboundCandidate(
@@ -296,10 +299,12 @@ class ClassicOversoldScenario(BaseScenario):
                     score=score,
                     history_df=stock_data,
                     technicals={
-                        'price': round(stock_data['Close'].iloc[-1], 2),
-                        'rsi': round(rsi, 2),
-                        'dist_sma_200': round(dist_sma, 2),
-                        'dist_low_90d': round(dist_low, 2)
+                        'price': round(stock_data['Close'].iloc[-1], 2) if pd.notna(stock_data['Close'].iloc[-1]) else 'N/A',
+                        'rsi': round(rsi, 2) if pd.notna(rsi) else 'N/A',
+                        'dist_sma_200': round(dist_sma, 2) if pd.notna(dist_sma) else 'N/A',
+                        'dist_low_90d': round(dist_low, 2) if pd.notna(dist_low) else 'N/A',
+                        'rsi_score': rsi_score,
+                        'prox_score': prox_score
                     },
                     fundamentals={'name': stock_info.get('shortName', 'N/A')}
                 )
@@ -386,18 +391,21 @@ class MeanReversionScenario(BaseScenario):
                 current_price = latest['Close']
                 lower_band = latest['BB_Lower']
 
-                if pd.isna(current_price) or pd.isna(lower_band) or lower_band <= 0:
+                # We can't proceed if key data is missing
+                if pd.isna(current_price) or pd.isna(lower_band):
                     continue
 
                 score = 0
                 percent_below_band = 0
+                is_candidate = False
                 # Signal: Price is at or below the lower Bollinger Band
-                if current_price <= lower_band:
+                if lower_band > 0 and current_price <= lower_band:
                     percent_below_band = ((lower_band - current_price) / current_price) * 100
-
                     self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
                     score = self._calculate_score(percent_below_band)
-                elif not ticker:
+                    is_candidate = True
+
+                if not is_candidate and not ticker:
                     continue
 
                 candidate = ReboundCandidate(
@@ -406,8 +414,8 @@ class MeanReversionScenario(BaseScenario):
                     score=score,
                     history_df=stock_data,
                     technicals={
-                        'price': round(current_price, 2),
-                        'lower_band': round(lower_band, 2),
+                        'price': round(current_price, 2) if pd.notna(current_price) else 'N/A',
+                        'lower_band': round(lower_band, 2) if pd.notna(lower_band) else 'N/A',
                         'percent_below_band': round(percent_below_band, 2)
                     },
                     fundamentals={'name': stock_info.get('shortName', 'N/A')}
@@ -484,17 +492,17 @@ class VolatilitySqueezeScenario(BaseScenario):
                 if stock_data.empty: continue
 
                 latest = stock_data.iloc[-1]
-                current_width = latest['BB_Width']
-                min_width = latest['BB_Width_Min']
-
-                if pd.isna(current_width) or pd.isna(min_width):
-                    continue
+                current_width = latest.get('BB_Width')
+                min_width = latest.get('BB_Width_Min')
 
                 score = 0
-                if current_width <= min_width * 1.1: # Signal: within 10% of the low
+                is_candidate = False
+                if pd.notna(current_width) and pd.notna(min_width) and current_width <= min_width * 1.1: # Signal: within 10% of the low
                     self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
                     score = self._calculate_score(current_width, min_width)
-                elif not ticker:
+                    is_candidate = True
+
+                if not is_candidate and not ticker:
                     continue
 
                 candidate = ReboundCandidate(
@@ -503,9 +511,9 @@ class VolatilitySqueezeScenario(BaseScenario):
                     score=score,
                     history_df=stock_data,
                     technicals={
-                        'price': round(latest['Close'], 2),
-                        'bb_width': round(current_width, 4),
-                        'bb_width_min': round(min_width, 4)
+                        'price': round(latest['Close'], 2) if pd.notna(latest['Close']) else 'N/A',
+                        'bb_width': round(current_width, 4) if pd.notna(current_width) else 'N/A',
+                        'bb_width_min': round(min_width, 4) if pd.notna(min_width) else 'N/A'
                     },
                     fundamentals={'name': stock_info.get('shortName', 'N/A')}
                 )
@@ -597,24 +605,26 @@ class MomentumBreakoutScenario(BaseScenario):
                 if stock_data.empty: continue
 
                 latest = stock_data.iloc[-1]
-                current_price = latest['Close']
-                high_52w = latest['High_52W']
-                current_volume = latest['Volume']
-                avg_volume = latest['Avg_Volume_30D']
-
-                if pd.isna(current_price) or pd.isna(high_52w) or pd.isna(current_volume) or pd.isna(avg_volume) or avg_volume == 0:
-                    continue
+                current_price = latest.get('Close')
+                high_52w = latest.get('High_52W')
+                current_volume = latest.get('Volume')
+                avg_volume = latest.get('Avg_Volume_30D')
 
                 score = 0
                 volume_ratio = 0
                 breakout_pct = 0
+                is_candidate = False
+
                 # Signal: Price breaks above the 52-week high on high volume
-                if current_price > high_52w and current_volume > avg_volume * 1.5:
-                    self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
-                    volume_ratio = current_volume / avg_volume
-                    breakout_pct = ((current_price - high_52w) / high_52w) * 100
-                    score = self._calculate_score(volume_ratio, breakout_pct)
-                elif not ticker:
+                if pd.notna(current_price) and pd.notna(high_52w) and pd.notna(current_volume) and pd.notna(avg_volume) and avg_volume > 0:
+                    if current_price > high_52w and current_volume > avg_volume * 1.5:
+                        self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate!")
+                        volume_ratio = current_volume / avg_volume
+                        breakout_pct = ((current_price - high_52w) / high_52w) * 100
+                        score = self._calculate_score(volume_ratio, breakout_pct)
+                        is_candidate = True
+
+                if not is_candidate and not ticker:
                     continue
 
                 candidate = ReboundCandidate(
@@ -623,8 +633,8 @@ class MomentumBreakoutScenario(BaseScenario):
                     score=score,
                     history_df=stock_data,
                     technicals={
-                        'price': round(current_price, 2),
-                        '52w_high': round(high_52w, 2),
+                        'price': round(current_price, 2) if pd.notna(current_price) else 'N/A',
+                        '52w_high': round(high_52w, 2) if pd.notna(high_52w) else 'N/A',
                         'volume_ratio': round(volume_ratio, 2),
                         'breakout_pct': round(breakout_pct, 2),
                     },
@@ -736,16 +746,20 @@ class GoldenCrossScenario(BaseScenario):
                 if not cross_found and not ticker:
                     continue
 
+                latest_close = stock_data.iloc[-1]['Close']
+                latest_sma50 = stock_data.iloc[-1]['SMA50']
+                latest_sma200 = stock_data.iloc[-1]['SMA200']
+
                 candidate = ReboundCandidate(
                     ticker=ticker_val,
                     scenario=self.name,
                     score=score,
                     history_df=stock_data,
                     technicals={
-                        'price': round(stock_data.iloc[-1]['Close'], 2),
+                        'price': round(latest_close, 2) if pd.notna(latest_close) else 'N/A',
                         'cross_days_ago': days_ago if cross_found else 'N/A',
-                        'sma_50': round(stock_data.iloc[-1]['SMA50'], 2),
-                        'sma_200': round(stock_data.iloc[-1]['SMA200'], 2),
+                        'sma_50': round(latest_sma50, 2) if pd.notna(latest_sma50) else 'N/A',
+                        'sma_200': round(latest_sma200, 2) if pd.notna(latest_sma200) else 'N/A',
                     },
                     fundamentals={'name': stock_info.get('shortName', 'N/A')}
                 )
@@ -1103,10 +1117,10 @@ class FundamentalDivergenceScenario(BaseScenario):
                 score=score if is_candidate else 0,
                 history_df=stock_data,
                 technicals={
-                    'price': round(latest['Close'], 2),
-                    'price_range_120d_pct': round(price_range_120d * 100, 2) if price_range_120d != 999 else 'N/A',
-                    'sma50_vs_sma200_pct': round(sma_diff_pct * 100, 2),
-                    'relative_perf_vs_index_pct': round(relative_perf * 100, 2),
+                    'price': round(latest['Close'], 2) if pd.notna(latest['Close']) else 'N/A',
+                    'price_range_120d_pct': round(price_range_120d * 100, 2) if pd.notna(price_range_120d) and price_range_120d != 999 else 'N/A',
+                    'sma50_vs_sma200_pct': round(sma_diff_pct * 100, 2) if pd.notna(sma_diff_pct) else 'N/A',
+                    'relative_perf_vs_index_pct': round(relative_perf * 100, 2) if pd.notna(relative_perf) else 'N/A',
                     **score_breakdown
                 },
                 fundamentals=fund_data
@@ -1270,15 +1284,17 @@ class QualityPullbackScenario(BaseScenario):
                 if not is_candidate and not ticker:
                     continue
 
+                dist_to_sma50 = abs((current_price - sma50) / sma50) * 100 if pd.notna(current_price) and pd.notna(sma50) and sma50 > 0 else -1
+
                 fund_data['name'] = ticker_info_cache.get(ticker_val, {}).get('shortName', 'N/A')
                 candidate = ReboundCandidate(
                     ticker=ticker_val, scenario=self.name, score=min(100, score) if is_candidate else 0,
                     history_df=stock_data,
                     technicals={
-                        'price': round(current_price, 2),
-                        'rsi': round(latest['RSI'], 2),
-                        '50_sma_value': round(sma50, 2),
-                        'dist_sma_50': round(dist_to_sma50, 2)
+                        'price': round(current_price, 2) if pd.notna(current_price) else 'N/A',
+                        'rsi': round(latest['RSI'], 2) if pd.notna(latest['RSI']) else 'N/A',
+                        '50_sma_value': round(sma50, 2) if pd.notna(sma50) else 'N/A',
+                        'dist_sma_50': round(dist_to_sma50, 2) if dist_to_sma50 != -1 else 'N/A'
                     },
                     fundamentals=fund_data
                 )
