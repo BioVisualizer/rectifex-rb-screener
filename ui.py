@@ -8,7 +8,7 @@ import shutil
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableView, QStatusBar, QFileDialog, QMessageBox, QHeaderView,
-    QProgressBar, QComboBox, QLabel, QLineEdit
+    QProgressBar, QComboBox, QLabel, QLineEdit, QSplitter, QTreeWidget, QTreeWidgetItem
 )
 from PyQt6.QtCore import (
     QObject, QThread, pyqtSignal, QAbstractTableModel, Qt, QSortFilterProxyModel, QRegularExpression
@@ -28,6 +28,7 @@ from ticker_manager import TickerManagerDialog
 from data_structures import ReboundCandidate
 from fundamental_fetcher import FundamentalFetcher
 from rebound_scenarios import ScenarioRunner, calculate_rsi, calculate_sma, calculate_macd
+from scoring import DEFAULT_REBOUND_SCORE_WEIGHTS
 
 # --- Worker Thread for Running Analysis ---
 
@@ -56,16 +57,14 @@ class AnalysisWorker(QObject):
     def run(self):
         """Runs the analysis and emits signals for progress and completion."""
         try:
-            fetcher = FundamentalFetcher()
             runner = ScenarioRunner(
-                fundamental_fetcher=fetcher,
                 progress_callback=self.signals.progress,
                 progress_percent_callback=self.signals.progress_percent,
                 is_cancelled_callback=lambda: self._is_cancelled
             )
 
             # Run the selected scenario using the new generic method
-            results = asyncio.run(runner.run_scenario(self.selected_scenario, ticker=self.ticker))
+            results = asyncio.run(runner.run_scan(self.selected_scenario, ticker=self.ticker))
             self.signals.result.emit(results)
         except Exception as e:
             import traceback
@@ -84,7 +83,7 @@ class PandasModel(QAbstractTableModel):
         self._data = data
         self.candidates_data = candidates_data
         self.numeric_columns = [
-            'Score', 'RSI', 'Price', 'Dist_SMA(%)', 'Dist_Low(%)'
+            'Rebound Score', 'Tech. Score', 'Fund. Score', 'Price'
         ]
 
     def rowCount(self, parent=None):
@@ -113,44 +112,42 @@ class PandasModel(QAbstractTableModel):
                 return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 
         if role == Qt.ItemDataRole.BackgroundRole:
-            score = self._data.iloc[row]["Score"]
-            if score > 80:
-                return QColor("#d4edda") # Green
-            elif score > 60:
-                return QColor("#fff3cd") # Yellow
-            elif score == 0:
-                return QColor("#f8d7da") # Red
+            if "Rebound Score" in self._data.columns:
+                score = self._data.iloc[row]["Rebound Score"]
+                if score > 80:
+                    return QColor("#d4edda")  # Green
+                elif score > 60:
+                    return QColor("#fff3cd")  # Yellow
+                elif score == 0:
+                    return QColor("#f8d7da")  # Red
 
-        if role == Qt.ItemDataRole.ToolTipRole and column_name == "Score":
-            base_tooltip = "Overall score (0-100) that rates the rebound potential. Higher is better."
+        if role == Qt.ItemDataRole.ToolTipRole and column_name == "Rebound Score":
+            base_tooltip = "Composite score (0-100) combining technical, fundamental, and market factors."
 
-            # Get the full candidate data for this row to create a detailed tooltip
             if row < len(self.candidates_data):
                 candidate = self.candidates_data[row]
-                breakdown_tooltip = ""
 
-                if candidate.scenario == "Classic Oversold":
-                    rsi_score = candidate.technicals.get('rsi_score')
-                    prox_score = candidate.technicals.get('prox_score')
-                    if rsi_score is not None and prox_score is not None:
-                        breakdown_tooltip = f"\n\nBreakdown ('Classic Oversold'):\n- RSI Score: {int(rsi_score)} / 60\n- Proximity Score: {int(prox_score)} / 40"
+                # Build a detailed breakdown string
+                tech_w = DEFAULT_REBOUND_SCORE_WEIGHTS['tech'] * 100
+                fund_w = DEFAULT_REBOUND_SCORE_WEIGHTS['fund'] * 100
+                mark_w = DEFAULT_REBOUND_SCORE_WEIGHTS['market'] * 100
 
-                elif candidate.scenario == "Fundamental Divergence":
-                    tech = candidate.technicals
-                    breakdown_tooltip = (
-                        f"\n\nBreakdown ('Fundamental Divergence'):\n"
-                        f"- Revenue Growth: {int(tech.get('rev_growth_score', 0) * 0.20)} / 20 pts\n"
-                        f"- EPS Momentum: {int(tech.get('eps_score', 0) * 0.20)} / 20 pts\n"
-                        f"- Free Cashflow: {int(tech.get('fcf_score', 0) * 0.10)} / 10 pts\n"
-                        f"- Debt-to-Equity: {int(tech.get('d2e_score', 0) * 0.10)} / 10 pts\n"
-                        f"- Price Range: {int(tech.get('range_score', 0) * 0.15)} / 15 pts\n"
-                        f"- SMA Proximity: {int(tech.get('sma_score', 0) * 0.10)} / 10 pts\n"
-                        f"- Relative Perf.: {int(tech.get('rel_perf_score', 0) * 0.10)} / 10 pts\n"
-                        f"- Valuation: {int(tech.get('valuation_score', 0) * 0.05)} / 5 pts"
-                    )
+                breakdown_lines = [
+                    f"\n\n--- Score Composition ---",
+                    f"- Technical Score: {candidate.technical_score} (Weight: {tech_w:.0f}%)",
+                    f"- Fundamental Score: {candidate.fundamental_score} (Weight: {fund_w:.0f}%)",
+                    f"- Market Context: {candidate.market_context_score} (Weight: {mark_w:.0f}%)"
+                ]
 
-                if breakdown_tooltip:
-                    return base_tooltip + breakdown_tooltip
+                if candidate.score_breakdown:
+                    breakdown_lines.append("\n--- Details ---")
+                    for key, value in candidate.score_breakdown.items():
+                        # Make keys more readable
+                        readable_key = key.replace('_sub_score', '').replace('_', ' ').title()
+                        breakdown_lines.append(f"- {readable_key}: {value}")
+
+                return base_tooltip + "\n".join(breakdown_lines)
+
             return base_tooltip
 
         return None
@@ -210,27 +207,34 @@ class CustomSortProxyModel(QSortFilterProxyModel):
 
     def lessThan(self, left, right):
         """
-        Custom sorting logic. It performs numerical comparison for the 'Score'
-        column and falls back to default string comparison for all others.
+        Custom sorting logic. It performs numerical comparison for score
+        columns and falls back to default string comparison for all others.
         """
         col = self.sortColumn()
         source_model = self.sourceModel()
 
-        # Ensure the column index is valid for the source model's dataframe
         if col >= len(source_model.get_dataframe().columns):
             return super().lessThan(left, right)
 
         column_name = source_model.get_dataframe().columns[col]
 
-        if column_name == "Score":
+        # List of columns to sort numerically
+        numeric_sort_columns = ['Rebound Score', 'Tech. Score', 'Fund. Score', 'Price']
+
+        if column_name in numeric_sort_columns:
             left_data = source_model.data(left, Qt.ItemDataRole.EditRole)
             right_data = source_model.data(right, Qt.ItemDataRole.EditRole)
 
             try:
-                # Perform numerical comparison
+                # For Price, remove '$' if present
+                if isinstance(left_data, str):
+                    left_data = left_data.replace('$', '')
+                if isinstance(right_data, str):
+                    right_data = right_data.replace('$', '')
+
                 return float(left_data) < float(right_data)
             except (ValueError, TypeError):
-                # Fallback for any non-numeric data
+                # Fallback for any non-numeric data like 'N/A'
                 return str(left_data) < str(right_data)
 
         # Default behavior for all other columns
@@ -437,63 +441,70 @@ class MainWindow(QMainWindow):
         # --- Layout and Widgets ---
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
+        top_level_layout = QVBoxLayout(central_widget)
 
-        controls_layout = QHBoxLayout()
-        self.scenarioComboBox = QComboBox()
-        self.scenarioComboBox.setObjectName("scenarioComboBox")
-        # Populate scenarios dynamically from the ScenarioRunner
-        self.scenarioComboBox.addItems(ScenarioRunner.get_available_scenarios())
-
-        self.scan_button = QPushButton("Start Scan")
-        self.stop_scan_button = QPushButton("Stop Scan")
+        # --- Top Toolbar ---
+        toolbar_layout = QHBoxLayout()
+        self.scan_button = QPushButton("Run Scan")
+        self.stop_scan_button = QPushButton("Stop")
         self.clear_cache_button = QPushButton("Clear Cache")
         self.manage_tickers_button = QPushButton("Manage Tickers")
         self.help_button = QPushButton("Help")
-        self.export_csv_button = QPushButton("Export to CSV")
-        self.export_excel_button = QPushButton("Export to XLSX")
+        self.export_csv_button = QPushButton("Export CSV")
+        self.export_excel_button = QPushButton("Export XLSX")
 
         self.export_csv_button.setEnabled(False)
         self.export_excel_button.setEnabled(False)
         self.stop_scan_button.hide()
         self.stop_scan_button.setEnabled(False)
 
+        toolbar_layout.addWidget(self.scan_button)
+        toolbar_layout.addWidget(self.stop_scan_button)
+        toolbar_layout.addStretch()
+        toolbar_layout.addWidget(self.manage_tickers_button)
+        toolbar_layout.addWidget(self.clear_cache_button)
+        toolbar_layout.addWidget(self.export_csv_button)
+        toolbar_layout.addWidget(self.export_excel_button)
+        toolbar_layout.addWidget(self.help_button)
+        top_level_layout.addLayout(toolbar_layout)
 
-        controls_layout.addWidget(self.scenarioComboBox)
-        controls_layout.addWidget(self.scan_button)
-        controls_layout.addWidget(self.stop_scan_button)
-        controls_layout.addWidget(self.clear_cache_button)
-        controls_layout.addWidget(self.manage_tickers_button)
-        controls_layout.addStretch()
-        controls_layout.addWidget(self.export_csv_button)
-        controls_layout.addWidget(self.export_excel_button)
-        controls_layout.addWidget(self.help_button)
+        # --- Main Content Area (Sidebar + Results) ---
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        main_layout.addLayout(controls_layout)
+        # Left Sidebar for Scenarios
+        self.scenario_tree = QTreeWidget()
+        self.scenario_tree.setHeaderHidden(True)
+        self.populate_scenario_tree()
+        main_splitter.addWidget(self.scenario_tree)
 
-        # Add search bar below the main controls
-        search_layout = QHBoxLayout()
-        search_layout.addWidget(QLabel("Filter Results:"))
+        # Right side for results and filters
+        results_area_widget = QWidget()
+        results_layout = QVBoxLayout(results_area_widget)
+
+        # Filter Ribbon
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(QLabel("Filter:"))
         self.search_input = QLineEdit()
-        self.search_input.setObjectName("searchInput")
-        self.search_input.setPlaceholderText("Enter Ticker or Name to filter...")
+        self.search_input.setPlaceholderText("Enter Ticker or Name...")
         self.search_input.setClearButtonEnabled(True)
-        search_layout.addWidget(self.search_input)
-        main_layout.addLayout(search_layout)
+        filter_layout.addWidget(self.search_input)
 
-        # Add single ticker scan controls
-        single_ticker_layout = QHBoxLayout()
-        single_ticker_layout.addWidget(QLabel("Single Ticker Scan:"))
+        filter_layout.addWidget(QLabel("Single Ticker:"))
         self.single_ticker_input = QLineEdit()
-        self.single_ticker_input.setPlaceholderText("Enter a single ticker (e.g., AAPL)")
-        self.single_ticker_scan_button = QPushButton("Scan Ticker")
-        single_ticker_layout.addWidget(self.single_ticker_input)
-        single_ticker_layout.addWidget(self.single_ticker_scan_button)
-        main_layout.addLayout(single_ticker_layout)
+        self.single_ticker_input.setPlaceholderText("e.g., AAPL")
+        self.single_ticker_scan_button = QPushButton("Scan")
+        filter_layout.addWidget(self.single_ticker_input)
+        filter_layout.addWidget(self.single_ticker_scan_button)
+        results_layout.addLayout(filter_layout)
 
         self.table_view = QTableView()
         self.table_view.setSortingEnabled(True)
-        main_layout.addWidget(self.table_view)
+        results_layout.addWidget(self.table_view)
+
+        main_splitter.addWidget(results_area_widget)
+        main_splitter.setSizes([250, 950]) # Initial size ratio for sidebar and main area
+
+        top_level_layout.addWidget(main_splitter)
 
         # Status bar with progress bar
         self.status_bar = QStatusBar()
@@ -513,6 +524,28 @@ class MainWindow(QMainWindow):
         self.export_csv_button.clicked.connect(self.export_to_csv)
         self.export_excel_button.clicked.connect(self.export_to_excel)
         self.search_input.textChanged.connect(self.filter_table)
+
+    def populate_scenario_tree(self):
+        """
+        Loads scenarios from the runner and populates the tree widget,
+        grouping them by the 'group' key from the config.
+        """
+        scenarios = ScenarioRunner.load_scenarios_config()
+
+        groups = {}
+        for scenario in scenarios:
+            group_name = scenario.get('group', 'Uncategorized')
+            if group_name not in groups:
+                groups[group_name] = []
+            groups[group_name].append(scenario)
+
+        for group_name, scenarios_in_group in groups.items():
+            group_item = QTreeWidgetItem(self.scenario_tree, [group_name])
+            for scenario in scenarios_in_group:
+                child_item = QTreeWidgetItem(group_item, [scenario['name']])
+                child_item.setData(0, Qt.ItemDataRole.UserRole, scenario['id']) # Store ID
+                child_item.setToolTip(0, scenario.get('description', ''))
+            self.scenario_tree.expandItem(group_item) # Expand groups by default
 
     def filter_table(self, text: str):
         """Filters the table view based on the search input."""
@@ -639,10 +672,17 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.show()
 
-        selected_scenario = self.scenarioComboBox.currentText()
+        selected_items = self.scenario_tree.selectedItems()
+        if not selected_items or selected_items[0].childCount() > 0:
+             QMessageBox.warning(self, "Selection Error", "Please select a specific scenario, not a group.")
+             self.scan_button.setEnabled(True)
+             self.single_ticker_scan_button.setEnabled(True)
+             return
+
+        selected_scenario_id = selected_items[0].data(0, Qt.ItemDataRole.UserRole)
 
         self.thread = QThread()
-        self.worker = AnalysisWorker(selected_scenario=selected_scenario, ticker=ticker)
+        self.worker = AnalysisWorker(selected_scenario=selected_scenario_id, ticker=ticker)
         self.worker.moveToThread(self.thread)
 
         self.thread.started.connect(self.worker.run)
@@ -702,11 +742,18 @@ class MainWindow(QMainWindow):
         # Scenario-specific details (like RSI/Prox scores) are in the tooltip.
         display_results_list = []
         for r in results:
+            # Format ROE as a percentage string, handling None
+            roe_val = r.fundamentals.get('roe')
+            roe_str = f"{roe_val * 100:.2f}%" if roe_val is not None else "N/A"
+
             res_dict = {
                 "Ticker": r.ticker,
                 "Name": r.fundamentals.get('name', 'N/A'),
                 "Scenario": r.scenario,
-                "Score": r.score,
+                "Rebound Score": r.rebound_score,
+                "Tech. Score": r.technical_score,
+                "Fund. Score": r.fundamental_score,
+                "ROE": roe_str,
                 "Price": r.technicals.get('price', '-'),
             }
             display_results_list.append(res_dict)
@@ -730,9 +777,9 @@ class MainWindow(QMainWindow):
         self.table_view.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Szenario
 
 
-        # Automatically sort by the 'Score' column, descending
+        # Automatically sort by the 'Rebound Score' column, descending
         try:
-            score_col_index = self.results_df.columns.get_loc("Score")
+            score_col_index = self.results_df.columns.get_loc("Rebound Score")
             self.table_view.sortByColumn(score_col_index, Qt.SortOrder.DescendingOrder)
         except KeyError:
             pass # No score column

@@ -4,10 +4,14 @@ from typing import Dict, Any
 @dataclass
 class ReboundCandidate:
     ticker: str
-    scenario: str  # e.g. "Classic Oversold", "Quality Stock Pullback"
-    score: int
+    scenario: str
+    rebound_score: int
+    technical_score: int = 0
+    fundamental_score: int = 0
+    market_context_score: int = 0
     technicals: Dict[str, Any] = field(default_factory=dict)
     fundamentals: Dict[str, Any] = field(default_factory=dict)
+    score_breakdown: Dict[str, Any] = field(default_factory=dict)
     # NOTE: Storing the entire DataFrame is memory-intensive, but it's a deliberate
     # trade-off to guarantee that the data plotted in the chart is the *exact*
     # same data used to generate the scan results, preventing inconsistencies.
