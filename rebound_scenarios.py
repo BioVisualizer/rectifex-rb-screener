@@ -4,7 +4,7 @@
 import pandas as pd
 import numpy as np
 import logging
-from typing import List, Dict, Any, Callable
+from typing import List, Dict, Any, Callable, Optional
 import json
 import re
 from datetime import datetime, timedelta
