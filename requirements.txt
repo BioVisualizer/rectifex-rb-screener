@@ -1,5 +1,6 @@
 PyQt6
 pandas
+numpy
 yfinance
 lxml
 openpyxl

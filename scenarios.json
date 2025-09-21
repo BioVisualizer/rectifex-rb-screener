@@ -1,0 +1,74 @@
+[
+  {
+    "id": "classic_oversold",
+    "group": "Contrarian / Mean Reversion",
+    "name": "Classic Oversold",
+    "description": "RSI14 below threshold AND price close to 200-day SMA or 90-day low. Contrarian, short-to-medium horizon.",
+    "signals": ["rsi14", "dist_to_sma200", "dist_to_90d_low"],
+    "params": {"rsi_threshold": 30, "sma200_dist_pct": 5, "low90_dist_pct": 3},
+    "class": "ClassicOversoldScenario"
+  },
+  {
+    "id": "mean_reversion_bb",
+    "group": "Contrarian / Mean Reversion",
+    "name": "Mean Reversion (Bollinger Bands)",
+    "description": "Price touches or closes below lower Bollinger Band (20, 2). Short horizon mean-reversion candidate.",
+    "signals": ["bb_lower_touch", "rsi", "volume"],
+    "params": {},
+    "class": "MeanReversionScenario"
+  },
+  {
+    "id": "momentum_breakout",
+    "group": "Trend / Momentum",
+    "name": "Momentum Breakout",
+    "description": "Closing at/above 52-week high with volume > 30-day avg × factor. Momentum style.",
+    "signals": ["52_week_high", "volume_spike"],
+    "params": {"volume_factor": 1.5},
+    "class": "MomentumBreakoutScenario"
+  },
+  {
+    "id": "golden_cross",
+    "group": "Trend / Momentum",
+    "name": "Golden Cross",
+    "description": "50-day SMA crossed above 200-day SMA within last N days. Long-term trend follow.",
+    "signals": ["sma50_cross_sma200"],
+    "params": {"recency_days": 5},
+    "class": "GoldenCrossScenario"
+  },
+  {
+    "id": "quality_stock_pullback",
+    "group": "Quality / Fundamental",
+    "name": "Quality Stock Pullback",
+    "description": "Quality companies in long-term uptrend that pulled back to 50SMA and meet quality checks.",
+    "signals": ["sma50_gt_sma200", "pullback_to_sma50", "revenue_growth", "positive_eps"],
+    "params": {"sma50_proximity_pct": 3},
+    "class": "QualityPullbackScenario"
+  },
+  {
+    "id": "fundamental_divergence",
+    "group": "Quality / Fundamental",
+    "name": "Fundamental Divergence",
+    "description": "Fundamentally high-quality but underperforming vs sector/index. Contrarian value discovery.",
+    "signals": ["revenue_growth_vs_sector", "price_momentum_vs_sector", "narrow_price_range"],
+    "params": {},
+    "class": "FundamentalDivergenceScenario"
+  },
+  {
+    "id": "volatility_squeeze",
+    "group": "Volatility / Income",
+    "name": "Volatility Squeeze",
+    "description": "Bollinger Bandwidth near 6-month low — possible breakout setup.",
+    "signals": ["bb_width_percentile", "volume"],
+    "params": {"bbw_percentile": 10},
+    "class": "VolatilitySqueezeScenario"
+  },
+  {
+    "id": "high_quality_dividend",
+    "group": "Volatility / Income",
+    "name": "High-Quality Dividend",
+    "description": "Attractive dividend yield with sustainable payout ratio and low leverage — income-oriented.",
+    "signals": ["yield_gt_min", "payout_ratio_lt_max", "debt_equity_lt_max"],
+    "params": {"min_yield": 0.03, "max_payout_ratio": 0.7, "max_debt_equity": 1.0},
+    "class": "HighQualityDividendScenario"
+  }
+]
