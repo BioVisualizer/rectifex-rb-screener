@@ -21,6 +21,7 @@
                 ]
             },
             "build-commands": [
+                "pip3 install --prefix=/app --no-cache-dir numpy",
                 "pip3 install --prefix=/app --no-cache-dir -r requirements.txt",
                 "install -D start.sh /app/bin/start.sh",
                 "install -D main.py /app/main.py",
