@@ -15,7 +15,6 @@ from abc import ABC, abstractmethod
 import config
 import data_loader
 from data_structures import ReboundCandidate
-from fundamental_fetcher import FundamentalFetcher
 from fundamentals import FundamentalDataHandler, FUNDAMENTALS_DIR, SECTOR_MEDIANS_FILE
 from scoring import (
     compute_fundamental_score,
