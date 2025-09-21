@@ -26,7 +26,6 @@ import config
 import data_loader
 from ticker_manager import TickerManagerDialog
 from data_structures import ReboundCandidate
-from fundamental_fetcher import FundamentalFetcher
 from rebound_scenarios import ScenarioRunner, calculate_rsi, calculate_sma, calculate_macd
 from scoring import DEFAULT_REBOUND_SCORE_WEIGHTS
 
