@@ -540,21 +540,68 @@ class MainWindow(QMainWindow):
         about_text = f"""
         <b>{config.APP_NAME}</b>
         <p>Version 1.0</p>
-        <p>This application scans global stock markets to identify potential long-rebound candidates based on technical analysis criteria.</p>
+        <p>This application scans global stock markets to identify potential long-rebound candidates based on a variety of technical and fundamental scenarios.</p>
         <p>This application was developed by Lukas Morcinek.</p>
         <hr>
-        <p><b>Scanning Scenarios & Score</b></p>
-        <p>The application uses different scenarios to find potential candidates:</p>
+        <p><b>Scanning Scenarios</b></p>
+        <p>The application uses eight different scenarios, each suited to a different trading style and concept.</p>
+
+        <h4>Classic Oversold</h4>
         <ul>
-            <li><b>Classic Oversold:</b> Looks for technically oversold stocks (low RSI) near strong, long-term support levels (200-day average or 90-day low).</li>
-            <li><b>Quality Stock Pullback:</b> Finds fundamentally strong companies in a healthy uptrend that have experienced a minor price dip towards their 50-day average.</li>
-            <li><b>Fundamental Divergence:</b> Identifies fundamentally strong stocks whose price has been stagnating or underperforming, creating a potential 'value' or 'contrarian' opportunity.</li>
-            <li><b>Momentum Breakout:</b> Identifies stocks hitting new 52-week highs on high trading volume, signaling strong upward momentum.</li>
-            <li><b>Golden Cross:</b> Detects when a stock's 50-day moving average has recently crossed above its 200-day average, a strong long-term bullish signal.</li>
-            <li><b>Mean Reversion (Bollinger Bands):</b> Finds stocks trading at or below their lower Bollinger Band, suggesting a statistically oversold condition and a potential rebound.</li>
-            <li><b>Volatility Squeeze:</b> Flags stocks where price volatility has become unusually low (narrow Bollinger Bands), which often precedes a large price move.</li>
-            <li><b>High-Quality Dividend:</b> A value-focused scan that looks for stocks with an attractive dividend yield, but filters for sustainability (payout ratio) and financial health (low debt).</li>
+            <li><b>Concept:</b> A contrarian, mean-reversion strategy. It operates on the idea that a stock's price, after a sharp decline, will likely bounce back (revert) to its long-term average. The scan identifies stocks that are technically "oversold" (indicated by a low Relative Strength Index - RSI) and are approaching a significant historical support level (like the 200-day moving average).</li>
+            <li><b>Suitability:</b> Best for short- to medium-term traders who are comfortable with contrarian plays and believe the market has overreacted to negative news. It aims to identify potential bottoming-out points.</li>
+            <li><b>Limitations:</b> This strategy can be risky and is sometimes referred to as "catching a falling knife." A stock can remain oversold for an extended period, and support levels can break, leading to further declines. It is most effective when confirmed by other indicators or a bullish market context.</li>
         </ul>
+
+        <h4>Quality Stock Pullback</h4>
+        <ul>
+            <li><b>Concept:</b> A trend-following strategy, often summarized as "buying the dip." It looks for fundamentally strong companies that are in a confirmed long-term uptrend and have experienced a temporary, minor price drop, bringing them closer to a short-term support level like the 50-day moving average.</li>
+            <li><b>Suitability:</b> Ideal for traders who prefer to follow the trend rather than bet against it. It offers a chance to enter a strong, upward-moving stock at a more reasonable price point (GARP - Growth at a Reasonable Price).</li>
+            <li><b>Limitations:</b> A minor pullback can sometimes be the beginning of a major trend reversal. The 50-day moving average is not a guaranteed support level. The fundamental metrics are based on past performance and do not guarantee future results.</li>
+        </ul>
+
+        <h4>Fundamental Divergence</h4>
+        <ul>
+            <li><b>Concept:</b> A value-oriented, contrarian strategy that seeks to find a mismatch between a company's strong financial health and its recent lackluster stock performance. The scan looks for companies with solid fundamentals (e.g., good growth, low debt) whose stock price has been stagnating or underperforming the market.</li>
+            <li><b>Suitability:</b> Best for patient, long-term investors who conduct their own fundamental analysis. It can help uncover potentially undervalued "hidden gems" before they are discovered by the broader market.</li>
+            <li><b>Limitations:</b> The market can ignore an "undervalued" stock for a long time, leading to a "value trap." There may be valid reasons for the poor stock performance that are not captured by the screener's fundamental metrics.</li>
+        </ul>
+
+        <h4>Momentum Breakout</h4>
+        <ul>
+            <li><b>Concept:</b> A classic momentum strategy based on the principle that "winners keep winning." It identifies stocks that are breaking out to new 52-week highs, especially when accompanied by a surge in trading volume. This suggests strong buying interest and the potential for continued upward movement.</li>
+            <li><b>Suitability:</b> For active traders who want to ride strong, established trends. It focuses on stocks that are already demonstrating significant positive momentum.</li>
+            <li><b>Limitations:</b> This strategy carries the risk of buying at the peak (a "false breakout"). A stock can quickly reverse after hitting a new high. It requires disciplined risk management, such as using tight stop-losses.</li>
+        </ul>
+
+        <h4>Golden Cross</h4>
+        <ul>
+            <li><b>Concept:</b> A long-term trend-following signal. A Golden Cross occurs when a shorter-term moving average (typically the 50-day) crosses above a longer-term moving average (typically the 200-day). It is widely regarded as a signal of a potential major, long-term uptrend.</li>
+            <li><b>Suitability:</b> For long-term investors and position traders who are looking to identify major shifts in a stock's primary trend. It can be used to confirm the start of a new bull phase for a stock.</li>
+            <li><b>Limitations:</b> This is a lagging indicator, meaning a significant portion of the price move may have already occurred by the time the signal appears. It can also generate false signals in choppy, sideways markets where the moving averages cross back and forth frequently.</li>
+        </ul>
+
+        <h4>Mean Reversion (Bollinger Bands)</h4>
+        <ul>
+            <li><b>Concept:</b> A short-term, mean-reversion strategy that uses Bollinger Bands to identify statistically oversold conditions. When a stock's price touches or closes below its lower Bollinger Band, it is considered to be far from its recent average price and may be due for a bounce.</li>
+            <li><b>Suitability:</b> For short-term "swing" traders looking for quick rebound opportunities. It provides clear, statistically-defined entry points for bounce plays.</li>
+            <li><b>Limitations:</b> In a strong, sustained downtrend, a stock can "walk the band" by continuously trading at or near the lower band without reverting to the mean. This signal is purely technical and ignores all fundamental factors.</li>
+        </ul>
+
+        <h4>Volatility Squeeze</h4>
+        <ul>
+            <li><b>Concept:</b> A pre-breakout or volatility-based strategy. It identifies stocks where price volatility has contracted to an unusually low level (i.e., the Bollinger Bands have narrowed significantly). This "squeeze" often precedes a period of high volatility—a significant price move or breakout.</li>
+            <li><b>Suitability:</b> For traders who want to position themselves *before* a major price move occurs. It allows for setting up trades with well-defined risk (e.g., placing stops outside the narrow consolidation range).</li>
+            <li><b>Limitations:</b> The scan does not predict the *direction* of the breakout, which could be up or down. A stock can also remain in a low-volatility state for a longer-than-expected period. It requires a plan for how to trade the eventual breakout in either direction.</li>
+        </ul>
+
+        <h4>High-Quality Dividend</h4>
+        <ul>
+            <li><b>Concept:</b> A value and income-investing strategy. It focuses not just on a high dividend yield, but on the *sustainability* of that dividend. It filters for companies with healthy financials (e.g., a reasonable payout ratio, low debt) to avoid "yield traps"—stocks with high but risky dividends that are likely to be cut.</li>
+            <li><b>Suitability:</b> For long-term, income-oriented investors who prioritize receiving a steady stream of cash flow from their investments over short-term capital appreciation.</li>
+            <li><b>Limitations:</b> A history of stable dividends does not guarantee future payments, as they can be cut at any time. The strategy is less focused on growth and may underperform in strong bull markets where growth stocks are favored.</li>
+        </ul>
+        <hr>
         <p><b>Column Explanations:</b></p>
         <ul>
             <li><b>Ticker:</b> The stock ticker symbol of the company.</li>
