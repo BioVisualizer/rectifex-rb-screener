@@ -20,7 +20,7 @@ The application is built with Python and PyQt6, and it is designed to be package
 
 ## Scanning Scenarios
 
-The application uses seven different scenarios to find potential candidates, covering a range of technical and fundamental analysis strategies.
+The application uses eight different scenarios to find potential candidates, covering a range of technical and fundamental analysis strategies.
 
 ### Classic Oversold
 This scenario looks for technically oversold stocks that are near strong, long-term support levels.
@@ -31,6 +31,11 @@ This scenario looks for technically oversold stocks that are near strong, long-t
 This scenario looks for fundamentally strong companies in a healthy, long-term uptrend that have experienced a recent, minor price dip.
 - **Signal:** The stock is in a confirmed uptrend (50-day SMA > 200-day SMA) and has pulled back to its 50-day SMA, while also meeting fundamental criteria for growth and financial health.
 - **Style:** Trend Following / Growth at a Reasonable Price (GARP).
+
+### Fundamental Divergence
+This scenario identifies fundamentally strong stocks whose price has been stagnating or underperforming the broader market. The goal is to find 'hidden gems' where the market may not have yet recognized the company's underlying financial health.
+- **Signal:** The stock meets several quality criteria (revenue growth, positive earnings, low debt) but its price has been trading in a narrow range and/or has performed worse than its corresponding market index over the last few months.
+- **Style:** Value / Contrarian.
 
 ### Momentum Breakout
 This scenario identifies stocks hitting new 52-week highs on high trading volume.
