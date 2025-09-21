@@ -9,7 +9,8 @@
         "--filesystem=home",
         "--socket=x11",
         "--socket=wayland",
-        "--device=dri"
+        "--device=dri",
+        "--unset-env=LD_PRELOAD"
     ],
     "modules": [
         {
