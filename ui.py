@@ -13,7 +13,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import (
     QObject, QThread, pyqtSignal, QAbstractTableModel, Qt, QSortFilterProxyModel, QRegularExpression
 )
-from PyQt6.QtGui import QColor, QIcon, QPixmap
+from PyQt6.QtGui import QColor, QIcon, QPixmap, QPainter, QPainterPath
+from PyQt6.QtWidgets import QFrame, QScrollArea, QMenu
 
 # For charting
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -421,7 +422,147 @@ class ChartWindow(QWidget):
             QMessageBox.critical(self, "Chart Error", f"Could not generate chart for {candidate.ticker}:\n\n{e}")
 
 
+from PyQt6.QtCore import QTimer, QPropertyAnimation, QEasingCurve, QRect
 # --- Main Application Window ---
+
+class ToastNotification(QFrame):
+    """
+    A non-intrusive toast/snackbar notification widget for displaying errors.
+    """
+    retry = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("ToastNotification")
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setStyleSheet("""
+            QFrame#ToastNotification {
+                background-color: #333333;
+                border: 1px solid #444444;
+                border-radius: 8px;
+            }
+            QLabel {
+                color: white;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+
+        title_label = QLabel("<b>Scan Failed</b>")
+        title_label.setStyleSheet("font-size: 14px;")
+
+        self.message_label = QLabel("An error occurred. Please try again.")
+
+        button_layout = QHBoxLayout()
+        retry_button = QPushButton("Retry")
+        details_button = QPushButton("Show Details")
+        button_layout.addStretch()
+        button_layout.addWidget(retry_button)
+        button_layout.addWidget(details_button)
+
+        layout.addWidget(title_label)
+        layout.addWidget(self.message_label)
+        layout.addLayout(button_layout)
+
+        retry_button.clicked.connect(self.retry.emit)
+        retry_button.clicked.connect(self.hide_toast)
+        details_button.clicked.connect(self.show_details)
+
+        self.detailed_error = ""
+        self.hide()
+
+    def show_toast(self, detailed_error: str):
+        self.detailed_error = detailed_error
+        self.parent().resizeEvent(None) # Trigger resize to position correctly
+        self.show()
+
+        # Automatically hide after a delay
+        QTimer.singleShot(10000, self.hide_toast)
+
+    def hide_toast(self):
+        self.hide()
+
+    def show_details(self):
+        QMessageBox.critical(self, "Error Details", self.detailed_error)
+
+class ScanCategoryCard(QFrame):
+    """
+    A custom widget that displays a category of scans with a title, description,
+    and a list of clickable sub-strategies.
+    """
+    # Signal emitted when a sub-strategy is clicked, passing its ID.
+    strategySelected = pyqtSignal(str)
+
+    def __init__(self, title, description, icon_char, sub_strategies, parent=None):
+        super().__init__(parent)
+        self.sub_strategy_buttons = {}
+
+        self.setObjectName("ScanCategoryCard")
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setFrameShadow(QFrame.Shadow.Raised)
+        self.setStyleSheet("""
+            QFrame#ScanCategoryCard {
+                background-color: #ffffff;
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
+                margin: 5px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+
+        # Title with Icon
+        title_label = QLabel(f'<span style="font-size: 20px;">{icon_char}</span>&nbsp;&nbsp;<b style="font-size: 16px;">{title}</b>')
+        title_label.setTextFormat(Qt.TextFormat.RichText)
+
+        # Description
+        desc_label = QLabel(description)
+        desc_label.setWordWrap(True)
+        desc_label.setStyleSheet("color: #666;")
+
+        # Sub-strategies
+        sub_strategies_layout = QVBoxLayout()
+        sub_strategies_layout.setContentsMargins(10, 5, 0, 5)
+        sub_strategies_layout.setSpacing(8)
+
+        for strategy in sub_strategies:
+            btn = QPushButton(strategy['name'])
+            btn.setObjectName("SubStrategyButton")
+            btn.setCheckable(True)
+            btn.setAutoExclusive(True)
+            btn.setStyleSheet("""
+                QPushButton#SubStrategyButton {
+                    text-align: left;
+                    padding: 8px;
+                    border: 1px solid transparent;
+                    border-radius: 4px;
+                    background-color: transparent;
+                }
+                QPushButton#SubStrategyButton:hover {
+                    background-color: #f0f8ff; /* aliceblue */
+                }
+                QPushButton#SubStrategyButton:checked {
+                    background-color: #e6f3ff;
+                    border-color: #a0c4e8;
+                    font-weight: bold;
+                }
+            """)
+            # Use a lambda to capture the current strategy's ID
+            btn.clicked.connect(lambda checked, s_id=strategy['id']: self.strategySelected.emit(s_id))
+            self.sub_strategy_buttons[strategy['id']] = btn
+            sub_strategies_layout.addWidget(btn)
+
+        layout.addWidget(title_label)
+        layout.addWidget(desc_label)
+        layout.addLayout(sub_strategies_layout)
+
+    def uncheck_all(self):
+        """Unchecks all buttons in this card."""
+        for btn in self.sub_strategy_buttons.values():
+            btn.setChecked(False)
+
 class MainWindow(QMainWindow):
     """The main window of the application."""
     def __init__(self):
@@ -436,6 +577,8 @@ class MainWindow(QMainWindow):
 
         self.chart_windows = []
         self.results_df = pd.DataFrame()
+        self.activeScan = None
+        self.scan_cards = [] # To hold all card widgets
 
         # --- Layout and Widgets ---
         central_widget = QWidget()
@@ -444,93 +587,407 @@ class MainWindow(QMainWindow):
 
         # --- Top Toolbar ---
         toolbar_layout = QHBoxLayout()
-        self.scan_button = QPushButton("Run Scan")
-        self.stop_scan_button = QPushButton("Stop")
-        self.clear_cache_button = QPushButton("Clear Cache")
-        self.manage_tickers_button = QPushButton("Manage Tickers")
-        self.help_button = QPushButton("Help")
-        self.export_csv_button = QPushButton("Export CSV")
-        self.export_excel_button = QPushButton("Export XLSX")
+        toolbar_layout.setSpacing(10) # Add some space between elements
 
-        self.export_csv_button.setEnabled(False)
-        self.export_excel_button.setEnabled(False)
+        # Primary Action Button (#btn-run-scan)
+        self.run_scan_button = QPushButton(" Run Scan")
+        self.run_scan_button.setObjectName("btn-run-scan")
+        self.run_scan_button.setIcon(QIcon.fromTheme("system-search"))
+        self.run_scan_button.setStyleSheet("""
+            QPushButton#btn-run-scan {
+                background-color: #3498db;
+                color: white;
+                font-weight: bold;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+            }
+            QPushButton#btn-run-scan:hover {
+                background-color: #2980b9;
+            }
+            QPushButton#btn-run-scan:disabled {
+                background-color: #a0a0a0;
+            }
+        """)
+        self.stop_scan_button = QPushButton("Stop") # Re-use existing stop button
         self.stop_scan_button.hide()
         self.stop_scan_button.setEnabled(False)
 
-        toolbar_layout.addWidget(self.scan_button)
+        toolbar_layout.addWidget(self.run_scan_button)
         toolbar_layout.addWidget(self.stop_scan_button)
+
+        # Global Inputs (#global-inputs)
+        inputs_layout = QHBoxLayout()
+        inputs_layout.setContentsMargins(20, 0, 20, 0) # Add space around the inputs
+        # Single Ticker Field
+        inputs_layout.addWidget(QLabel("Single Ticker (Optional):"))
+        self.single_ticker_input = QLineEdit()
+        self.single_ticker_input.setPlaceholderText("e.g., AAPL, GOOGL")
+        self.single_ticker_input.setClearButtonEnabled(True)
+        inputs_layout.addWidget(self.single_ticker_input)
+        # Filter Results Field
+        inputs_layout.addWidget(QLabel("Filter Results:"))
+        self.filter_results_input = QLineEdit()
+        self.filter_results_input.setPlaceholderText("Filter by name or ticker...")
+        self.filter_results_input.setClearButtonEnabled(True)
+        inputs_layout.addWidget(self.filter_results_input)
+        toolbar_layout.addLayout(inputs_layout)
+
         toolbar_layout.addStretch()
-        toolbar_layout.addWidget(self.manage_tickers_button)
-        toolbar_layout.addWidget(self.clear_cache_button)
-        toolbar_layout.addWidget(self.export_csv_button)
-        toolbar_layout.addWidget(self.export_excel_button)
+
+        # Secondary Actions (#secondary-actions)
+        self.manage_watchlists_button = QPushButton("Manage Watchlists")
+        self.export_button = QPushButton("Export")
+        self.help_button = QPushButton("Help")
+        self.settings_button = QPushButton("Settings")
+
+        # Create Export Menu
+        export_menu = QMenu(self)
+        self.export_csv_action = export_menu.addAction("Export CSV")
+        self.export_xlsx_action = export_menu.addAction("Export XLSX")
+        self.export_button.setMenu(export_menu)
+        self.export_csv_action.setEnabled(False)
+        self.export_xlsx_action.setEnabled(False)
+
+        toolbar_layout.addWidget(self.manage_watchlists_button)
+        toolbar_layout.addWidget(self.export_button)
         toolbar_layout.addWidget(self.help_button)
+        toolbar_layout.addWidget(self.settings_button)
+
         top_level_layout.addLayout(toolbar_layout)
 
-        # --- Main Content Area (Sidebar + Results) ---
+        # --- Main Content Area (Three-Column Layout) ---
+        # Create the main horizontal splitter for the three columns
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Left Sidebar for Scenarios
-        self.scenario_tree = QTreeWidget()
-        self.scenario_tree.setHeaderHidden(True)
-        self.populate_scenario_tree()
-        main_splitter.addWidget(self.scenario_tree)
+        # Column 1: Strategy Selection Pane
+        self.selection_pane = QWidget()
+        self.selection_pane.setObjectName("selection-pane")
+        self.selection_pane.setStyleSheet("background-color: #f8f9fa;")
+        selection_pane_layout = QVBoxLayout(self.selection_pane)
+        selection_pane_layout.setContentsMargins(0,0,0,0)
 
-        # Right side for results and filters
-        results_area_widget = QWidget()
-        results_layout = QVBoxLayout(results_area_widget)
+        # Add a scroll area to the selection pane
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setStyleSheet("QScrollArea { border: none; }")
+        selection_pane_layout.addWidget(scroll_area)
 
-        # Filter Ribbon
-        filter_layout = QHBoxLayout()
-        filter_layout.addWidget(QLabel("Filter:"))
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Enter Ticker or Name...")
-        self.search_input.setClearButtonEnabled(True)
-        filter_layout.addWidget(self.search_input)
+        # Create a container for the cards
+        card_container = QWidget()
+        self.card_layout = QVBoxLayout(card_container)
+        self.card_layout.setSpacing(5)
+        self.card_layout.addStretch() # Pushes cards to the top
+        scroll_area.setWidget(card_container)
 
-        filter_layout.addWidget(QLabel("Single Ticker:"))
-        self.single_ticker_input = QLineEdit()
-        self.single_ticker_input.setPlaceholderText("e.g., AAPL")
-        self.single_ticker_scan_button = QPushButton("Scan")
-        filter_layout.addWidget(self.single_ticker_input)
-        filter_layout.addWidget(self.single_ticker_scan_button)
-        results_layout.addLayout(filter_layout)
+        self.populate_strategy_cards()
+        main_splitter.addWidget(self.selection_pane)
+
+        # Column 2: Main Content Pane
+        self.main_content_pane = QWidget()
+        self.main_content_pane.setObjectName("main-content-pane")
+        main_content_layout = QVBoxLayout(self.main_content_pane)
+        main_content_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_content_pane.setStyleSheet("background-color: white; border: none;")
+
+        self.stacked_widget = QStackedWidget()
+        main_content_layout.addWidget(self.stacked_widget)
+
+        # -- Onboarding State Widget --
+        onboarding_widget = QWidget()
+        onboarding_layout = QVBoxLayout(onboarding_widget)
+        onboarding_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        onboarding_widget.setStyleSheet("background-color: #ffffff; border: none;")
+
+        headline = QLabel("Welcome! Let's Find Your Next Investment.")
+        headline.setStyleSheet("font-size: 24px; font-weight: bold; color: #333;")
+
+        instructions = QLabel(
+        """
+        <ol>
+            <li>Select a scan strategy on the left.</li>
+            <li>Click 'Run Scan' to begin.</li>
+            <li>Analyze your results right here.</li>
+        </ol>
+        """
+        )
+        instructions.setStyleSheet("font-size: 14px; color: #555;")
+
+        self.demo_scan_button = QPushButton("Run Demo Scan")
+        self.demo_scan_button.setFixedWidth(150)
+
+        onboarding_layout.addWidget(headline)
+        onboarding_layout.addWidget(instructions)
+        onboarding_layout.addWidget(self.demo_scan_button, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # -- Results State Widget --
+        results_widget = QWidget()
+        results_layout = QVBoxLayout(results_widget)
+
+        results_header_layout = QHBoxLayout()
+        self.results_summary_label = QLabel("Found 0 results.")
+        self.scan_progress_label = QLabel("") # Will show "Scanning..." text
+        results_header_layout.addWidget(self.results_summary_label)
+        results_header_layout.addStretch()
+        results_header_layout.addWidget(self.scan_progress_label)
 
         self.table_view = QTableView()
         self.table_view.setSortingEnabled(True)
+
+        results_layout.addLayout(results_header_layout)
         results_layout.addWidget(self.table_view)
 
-        main_splitter.addWidget(results_area_widget)
-        main_splitter.setSizes([250, 950]) # Initial size ratio for sidebar and main area
+        # -- No Results State Widget --
+        no_results_widget = QWidget()
+        no_results_layout = QVBoxLayout(no_results_widget)
+        no_results_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.no_results_label = QLabel("No stocks matched your scan.")
+        self.no_results_label.setStyleSheet("font-size: 16px; color: #777;")
+        no_results_layout.addWidget(self.no_results_label)
+
+        self.stacked_widget.addWidget(onboarding_widget)
+        self.stacked_widget.addWidget(results_widget)
+        self.stacked_widget.addWidget(no_results_widget)
+
+        main_splitter.addWidget(self.main_content_pane)
+
+        # Column 3: Contextual Information Pane
+        self.context_pane = QWidget()
+        self.context_pane.setObjectName("context-pane")
+        self.context_pane.setStyleSheet("background-color: #f8f9fa; border-left: 1px solid #e0e0e0;")
+        context_layout = QVBoxLayout(self.context_pane)
+        context_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.context_stack = QStackedWidget()
+        context_layout.addWidget(self.context_stack)
+
+        # -- View 0: Scan Explanation Widget --
+        self.scan_explanation_widget = QWidget()
+        self.scan_explanation_layout = QVBoxLayout(self.scan_explanation_widget)
+        self.scan_explanation_layout.setContentsMargins(15, 15, 15, 15)
+        self.scan_explanation_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.context_stack.addWidget(self.scan_explanation_widget)
+
+        # -- View 1: Ticker Detail Widget --
+        self.ticker_detail_widget = QWidget()
+        self.ticker_detail_layout = QVBoxLayout(self.ticker_detail_widget)
+        self.ticker_detail_layout.setContentsMargins(15, 15, 15, 15)
+        self.ticker_detail_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.context_stack.addWidget(self.ticker_detail_widget)
+
+        # Set initial view
+        self.context_stack.setCurrentIndex(0)
+        # Add a default message
+        default_label = QLabel("Select a scan from the left to learn more about it.")
+        default_label.setWordWrap(True)
+        self.scan_explanation_layout.addWidget(default_label)
+
+        main_splitter.addWidget(self.context_pane)
+
+        # Set initial sizes for the panes
+        # Approximate ratio: 20% | 55% | 25%
+        total_width = self.width()
+        main_splitter.setSizes([int(total_width * 0.25), int(total_width * 0.50), int(total_width * 0.25)])
 
         top_level_layout.addWidget(main_splitter)
+
+        # The table_view is now created and homed within the results_widget above
 
         # Status bar with progress bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
+        self.status_bar.setStyleSheet("QStatusBar::item { border: 0px; }") # Remove borders
+
+        # Footer Labels
+        self.data_source_label = QLabel("Data Source: yfinance")
+        self.last_updated_label = QLabel("Last Updated: N/A")
+        self.status_bar.addWidget(self.data_source_label)
+        self.status_bar.addPermanentWidget(self.last_updated_label)
+
         self.progress_bar = QProgressBar()
         self.status_bar.addPermanentWidget(self.progress_bar)
         self.progress_bar.hide()
 
-        # --- Connections ---
-        self.scan_button.clicked.connect(self.start_full_scan)
-        self.single_ticker_scan_button.clicked.connect(self.start_single_ticker_scan)
-        self.stop_scan_button.clicked.connect(self.stop_scan)
-        self.clear_cache_button.clicked.connect(self.clear_cache)
-        self.manage_tickers_button.clicked.connect(self.open_ticker_manager)
-        self.help_button.clicked.connect(self.show_about_dialog)
-        self.table_view.doubleClicked.connect(self.open_chart_for_selection)
-        self.export_csv_button.clicked.connect(self.export_to_csv)
-        self.export_excel_button.clicked.connect(self.export_to_excel)
-        self.search_input.textChanged.connect(self.filter_table)
+        # Toast Notification
+        self.toast = ToastNotification(self)
 
-    def populate_scenario_tree(self):
+        # --- Connections ---
+        self.run_scan_button.clicked.connect(self.start_scan)
+        self.stop_scan_button.clicked.connect(self.stop_scan)
+        self.settings_button.clicked.connect(self.open_settings_dialog)
+        self.manage_watchlists_button.clicked.connect(self.open_ticker_manager)
+        self.help_button.clicked.connect(self.show_about_dialog)
+        self.table_view.clicked.connect(self.on_ticker_selected) # For context pane
+        self.table_view.doubleClicked.connect(self.open_chart_for_selection) # For chart window
+        self.demo_scan_button.clicked.connect(self.run_demo_scan)
+        self.toast.retry.connect(self.start_scan)
+        self.export_csv_action.triggered.connect(self.export_to_csv)
+        self.export_xlsx_action.triggered.connect(self.export_to_excel)
+        self.filter_results_input.textChanged.connect(self.filter_table)
+        self.single_ticker_input.textChanged.connect(self.validate_single_ticker_input)
+
+    def validate_single_ticker_input(self, text: str):
         """
-        Loads scenarios from the runner and populates the tree widget,
-        grouping them by the 'group' key from the config.
+        Validates the single ticker input field.
+        Disables the 'Run Scan' button if the text is not empty and contains invalid characters.
+        A valid ticker is uppercase letters, numbers, and optionally '.' or '-'.
+        """
+        if not text: # Empty string is valid (optional field)
+            self.run_scan_button.setEnabled(True)
+            return
+
+        # Simple regex for typical ticker formats.
+        # Allows sequences like 'AAPL', 'GOOGL', 'BRK-B', 'BF.B'
+        valid_ticker_regex = QRegularExpression("^[A-Z0-9.-]+$")
+        match = valid_ticker_regex.match(text.upper())
+
+        if match.hasMatch():
+            self.run_scan_button.setEnabled(True)
+        else:
+            self.run_scan_button.setEnabled(False)
+
+    def on_ticker_selected(self, index):
+        """Handles a click on a ticker in the results table."""
+        if not index.isValid():
+            return
+        source_index = self.table_view.model().mapToSource(index)
+        if source_index.row() < len(self.all_candidates_data):
+            candidate = self.all_candidates_data[source_index.row()]
+            asyncio.create_task(self.update_context_pane_for_ticker(candidate))
+
+    def on_strategy_selected(self, strategy_id):
+        """Handles a click on any sub-strategy button from any card."""
+        self.activeScan = strategy_id
+
+        # When a new strategy is selected, clear the results and show the onboarding screen.
+        self.stacked_widget.setCurrentIndex(0) # 0 is onboarding
+        self.results_df = pd.DataFrame()
+        self.table_view.setModel(None)
+
+        # Uncheck buttons in all other cards
+        sender_card = self.sender()
+        for card in self.scan_cards:
+             if card is not sender_card:
+                card.uncheck_all()
+
+        # Update the context pane
+        self.update_context_pane_for_scan(strategy_id)
+
+    def update_context_pane_for_scan(self, strategy_id):
+        # Clear the previous content
+        for i in reversed(range(self.scan_explanation_layout.count())):
+            self.scan_explanation_layout.itemAt(i).widget().setParent(None)
+
+        scenarios = ScenarioRunner.load_scenarios_config()
+        scenario_data = next((s for s in scenarios if s['id'] == strategy_id), None)
+
+        if scenario_data:
+            title = QLabel(f"<b>{scenario_data.get('name', 'N/A')}</b>")
+            title.setStyleSheet("font-size: 16px; margin-bottom: 5px;")
+
+            what_it_is_title = QLabel("<b>What It Is</b>")
+            what_it_is_title.setStyleSheet("color: #005a9e; margin-top: 10px;")
+            what_it_is_text = QLabel(scenario_data.get('what_it_is', 'No details available.'))
+            what_it_is_text.setWordWrap(True)
+
+            best_for_title = QLabel("<b>Best For</b>")
+            best_for_title.setStyleSheet("color: #005a9e; margin-top: 10px;")
+            best_for_text = QLabel(scenario_data.get('best_for', 'No details available.'))
+            best_for_text.setWordWrap(True)
+
+            self.scan_explanation_layout.addWidget(title)
+            self.scan_explanation_layout.addWidget(what_it_is_title)
+            self.scan_explanation_layout.addWidget(what_it_is_text)
+            self.scan_explanation_layout.addWidget(best_for_title)
+            self.scan_explanation_layout.addWidget(best_for_text)
+            self.scan_explanation_layout.addStretch()
+
+        self.context_stack.setCurrentIndex(0)
+
+    async def update_context_pane_for_ticker(self, candidate: ReboundCandidate):
+        # Clear the previous content
+        for i in reversed(range(self.ticker_detail_layout.count())):
+            self.ticker_detail_layout.itemAt(i).widget().setParent(None)
+
+        # Show loading message
+        loading_label = QLabel("Loading Ticker Details...")
+        self.ticker_detail_layout.addWidget(loading_label)
+        self.context_stack.setCurrentIndex(1)
+
+        # Fetch full data
+        if not hasattr(self, 'fund_handler'):
+            from fundamentals import FundamentalDataHandler
+            self.fund_handler = FundamentalDataHandler()
+
+        info = await self.fund_handler.get_full_ticker_info(candidate.ticker)
+
+        # Clear loading message
+        loading_label.setParent(None)
+
+        if not info:
+            error_label = QLabel(f"Could not load details for {candidate.ticker}.")
+            self.ticker_detail_layout.addWidget(error_label)
+            return
+
+        # Populate with new data
+        title = QLabel(f"<b>{info.get('shortName', candidate.ticker)}</b> ({candidate.ticker})")
+        title.setStyleSheet("font-size: 16px; margin-bottom: 5px;")
+
+        # TODO: Add a larger chart here later
+        chart_placeholder = QLabel("Chart will be here")
+        chart_placeholder.setMinimumHeight(150)
+        chart_placeholder.setStyleSheet("background-color: #e0e0e0; border: 1px solid #ccc;")
+        chart_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Key metrics
+        def format_market_cap(mc):
+            if mc is None: return "N/A"
+            if mc > 1_000_000_000_000: return f"${mc/1_000_000_000_000:.2f}T"
+            if mc > 1_000_000_000: return f"${mc/1_000_000_000:.2f}B"
+            if mc > 1_000_000: return f"${mc/1_000_000:.2f}M"
+            return f"${mc}"
+
+        pe_ratio = f"{info.get('trailingPE'):.2f}" if info.get('trailingPE') else "N/A"
+        div_yield = f"{info.get('dividendYield')*100:.2f}%" if info.get('dividendYield') else "N/A"
+
+        metrics_text = (
+            f"<b>Market Cap:</b> {format_market_cap(info.get('marketCap'))}<br>"
+            f"<b>P/E Ratio:</b> {pe_ratio}<br>"
+            f"<b>Dividend Yield:</b> {div_yield}"
+        )
+        metrics_label = QLabel(metrics_text)
+
+        # Company Bio
+        bio_title = QLabel("<b>Company Bio</b>")
+        bio_title.setStyleSheet("color: #005a9e; margin-top: 10px;")
+        bio_text = QLabel(info.get('longBusinessSummary', 'No company summary available.'))
+        bio_text.setWordWrap(True)
+
+        self.ticker_detail_layout.addWidget(title)
+        self.ticker_detail_layout.addWidget(chart_placeholder)
+        self.ticker_detail_layout.addWidget(metrics_label)
+        self.ticker_detail_layout.addWidget(bio_title)
+        self.ticker_detail_layout.addWidget(bio_text)
+        self.ticker_detail_layout.addStretch()
+
+
+    def populate_strategy_cards(self):
+        """
+        Loads scenarios from the runner and populates the selection pane with
+        ScanCategoryCard widgets.
         """
         scenarios = ScenarioRunner.load_scenarios_config()
 
+        # Define icons for categories
+        icons = {
+            "Trend & Momentum": "📈",
+            "Contrarian & Reversion": "📉",
+            "Value & Fundamental": "💰",
+            "Volatility": "⚡️"
+        }
+
+        # Group scenarios by the 'group' key
         groups = {}
         for scenario in scenarios:
             group_name = scenario.get('group', 'Uncategorized')
@@ -538,13 +995,17 @@ class MainWindow(QMainWindow):
                 groups[group_name] = []
             groups[group_name].append(scenario)
 
+        # Create a card for each group
         for group_name, scenarios_in_group in groups.items():
-            group_item = QTreeWidgetItem(self.scenario_tree, [group_name])
-            for scenario in scenarios_in_group:
-                child_item = QTreeWidgetItem(group_item, [scenario['name']])
-                child_item.setData(0, Qt.ItemDataRole.UserRole, scenario['id']) # Store ID
-                child_item.setToolTip(0, scenario.get('description', ''))
-            self.scenario_tree.expandItem(group_item) # Expand groups by default
+            card = ScanCategoryCard(
+                title=group_name,
+                description=scenarios_in_group[0].get('group_description', ''), # Assuming first desc is fine
+                icon_char=icons.get(group_name, "❓"),
+                sub_strategies=scenarios_in_group
+            )
+            card.strategySelected.connect(self.on_strategy_selected)
+            self.card_layout.insertWidget(self.card_layout.count() - 1, card)
+            self.scan_cards.append(card)
 
     def filter_table(self, text: str):
         """Filters the table view based on the search input."""
@@ -567,118 +1028,74 @@ class MainWindow(QMainWindow):
         dialog = TickerManagerDialog(self)
         dialog.exec()
 
+    def open_settings_dialog(self):
+        """
+        Opens a settings dialog.
+        For now, it just contains the 'Clear Cache' functionality.
+        """
+        reply = QMessageBox.question(self, "Confirm Cache Deletion",
+                                     f"Are you sure you want to delete all cached data from {config.CACHE_DIR}?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                     QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                shutil.rmtree(config.CACHE_DIR)
+                config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                self.status_bar.showMessage("Cache successfully cleared.", 5000)
+            except Exception as e:
+                QMessageBox.critical(self, "Cache Error", f"Failed to clear cache: {e}")
+
     def show_about_dialog(self):
-        """Shows the 'About' dialog with application info and credits."""
+        """Shows a simple 'About' dialog."""
         about_text = f"""
-        <b>{config.APP_NAME}</b>
-        <p>Version 1.0</p>
-        <p>This application scans global stock markets to identify potential long-rebound candidates based on a variety of technical and fundamental scenarios.</p>
-        <p>This application was developed by Lukas Morcinek.</p>
-        <hr>
-        <p><b>Scanning Scenarios</b></p>
-        <p>The application uses eight different scenarios, each suited to a different trading style and concept.</p>
-
-        <h4>Classic Oversold</h4>
-        <ul>
-            <li><b>Concept:</b> A contrarian, mean-reversion strategy. It operates on the idea that a stock's price, after a sharp decline, will likely bounce back (revert) to its long-term average. The scan identifies stocks that are technically "oversold" (indicated by a low Relative Strength Index - RSI) and are approaching a significant historical support level (like the 200-day moving average).</li>
-            <li><b>Suitability:</b> Best for short- to medium-term traders who are comfortable with contrarian plays and believe the market has overreacted to negative news. It aims to identify potential bottoming-out points.</li>
-            <li><b>Limitations:</b> This strategy can be risky and is sometimes referred to as "catching a falling knife." A stock can remain oversold for an extended period, and support levels can break, leading to further declines. It is most effective when confirmed by other indicators or a bullish market context.</li>
-        </ul>
-
-        <h4>Quality Stock Pullback</h4>
-        <ul>
-            <li><b>Concept:</b> A trend-following strategy, often summarized as "buying the dip." It looks for fundamentally strong companies that are in a confirmed long-term uptrend and have experienced a temporary, minor price drop, bringing them closer to a short-term support level like the 50-day moving average.</li>
-            <li><b>Suitability:</b> Ideal for traders who prefer to follow the trend rather than bet against it. It offers a chance to enter a strong, upward-moving stock at a more reasonable price point (GARP - Growth at a Reasonable Price).</li>
-            <li><b>Limitations:</b> A minor pullback can sometimes be the beginning of a major trend reversal. The 50-day moving average is not a guaranteed support level. The fundamental metrics are based on past performance and do not guarantee future results.</li>
-        </ul>
-
-        <h4>Fundamental Divergence</h4>
-        <ul>
-            <li><b>Concept:</b> A value-oriented, contrarian strategy that seeks to find a mismatch between a company's strong financial health and its recent lackluster stock performance. The scan looks for companies with solid fundamentals (e.g., good growth, low debt) whose stock price has been stagnating or underperforming the market.</li>
-            <li><b>Suitability:</b> Best for patient, long-term investors who conduct their own fundamental analysis. It can help uncover potentially undervalued "hidden gems" before they are discovered by the broader market.</li>
-            <li><b>Limitations:</b> The market can ignore an "undervalued" stock for a long time, leading to a "value trap." There may be valid reasons for the poor stock performance that are not captured by the screener's fundamental metrics.</li>
-        </ul>
-
-        <h4>Momentum Breakout</h4>
-        <ul>
-            <li><b>Concept:</b> A classic momentum strategy based on the principle that "winners keep winning." It identifies stocks that are breaking out to new 52-week highs, especially when accompanied by a surge in trading volume. This suggests strong buying interest and the potential for continued upward movement.</li>
-            <li><b>Suitability:</b> For active traders who want to ride strong, established trends. It focuses on stocks that are already demonstrating significant positive momentum.</li>
-            <li><b>Limitations:</b> This strategy carries the risk of buying at the peak (a "false breakout"). A stock can quickly reverse after hitting a new high. It requires disciplined risk management, such as using tight stop-losses.</li>
-        </ul>
-
-        <h4>Golden Cross</h4>
-        <ul>
-            <li><b>Concept:</b> A long-term trend-following signal. A Golden Cross occurs when a shorter-term moving average (typically the 50-day) crosses above a longer-term moving average (typically the 200-day). It is widely regarded as a signal of a potential major, long-term uptrend.</li>
-            <li><b>Suitability:</b> For long-term investors and position traders who are looking to identify major shifts in a stock's primary trend. It can be used to confirm the start of a new bull phase for a stock.</li>
-            <li><b>Limitations:</b> This is a lagging indicator, meaning a significant portion of the price move may have already occurred by the time the signal appears. It can also generate false signals in choppy, sideways markets where the moving averages cross back and forth frequently.</li>
-        </ul>
-
-        <h4>Mean Reversion (Bollinger Bands)</h4>
-        <ul>
-            <li><b>Concept:</b> A short-term, mean-reversion strategy that uses Bollinger Bands to identify statistically oversold conditions. When a stock's price touches or closes below its lower Bollinger Band, it is considered to be far from its recent average price and may be due for a bounce.</li>
-            <li><b>Suitability:</b> For short-term "swing" traders looking for quick rebound opportunities. It provides clear, statistically-defined entry points for bounce plays.</li>
-            <li><b>Limitations:</b> In a strong, sustained downtrend, a stock can "walk the band" by continuously trading at or near the lower band without reverting to the mean. This signal is purely technical and ignores all fundamental factors.</li>
-        </ul>
-
-        <h4>Volatility Squeeze</h4>
-        <ul>
-            <li><b>Concept:</b> A pre-breakout or volatility-based strategy. It identifies stocks where price volatility has contracted to an unusually low level (i.e., the Bollinger Bands have narrowed significantly). This "squeeze" often precedes a period of high volatility—a significant price move or breakout.</li>
-            <li><b>Suitability:</b> For traders who want to position themselves *before* a major price move occurs. It allows for setting up trades with well-defined risk (e.g., placing stops outside the narrow consolidation range).</li>
-            <li><b>Limitations:</b> The scan does not predict the *direction* of the breakout, which could be up or down. A stock can also remain in a low-volatility state for a longer-than-expected period. It requires a plan for how to trade the eventual breakout in either direction.</li>
-        </ul>
-
-        <h4>High-Quality Dividend</h4>
-        <ul>
-            <li><b>Concept:</b> A value and income-investing strategy. It focuses not just on a high dividend yield, but on the *sustainability* of that dividend. It filters for companies with healthy financials (e.g., a reasonable payout ratio, low debt) to avoid "yield traps"—stocks with high but risky dividends that are likely to be cut.</li>
-            <li><b>Suitability:</b> For long-term, income-oriented investors who prioritize receiving a steady stream of cash flow from their investments over short-term capital appreciation.</li>
-            <li><b>Limitations:</b> A history of stable dividends does not guarantee future payments, as they can be cut at any time. The strategy is less focused on growth and may underperform in strong bull markets where growth stocks are favored.</li>
-        </ul>
-        <hr>
-        <p><b>Column Explanations:</b></p>
-        <ul>
-            <li><b>Ticker:</b> The stock ticker symbol of the company.</li>
-            <li><b>Name:</b> The name of the company.</li>
-            <li><b>Scenario:</b> The screening scenario that qualified the stock.</li>
-            <li><b>Score:</b> A weighted score (0-100) that rates the rebound potential. Higher is better. Hover over a cell for details.</li>
-            <li><b>Price:</b> The last closing price of the stock.</li>
-        </ul>
+        <b>{config.APP_NAME} v2.0</b>
+        <p>This application scans global stock markets to identify potential investment candidates based on a variety of technical and fundamental scenarios.</p>
+        <p>Developed by Lukas Morcinek.</p>
         <hr>
         <p><b>Disclaimer:</b></p>
-        <p>This tool is for informational purposes only and does not constitute financial advice. The results are based on historical data and technical indicators, which do not guarantee future performance. Always conduct your own thorough research before making any investment decisions.</p>
+        <p>This tool is for informational purposes only and does not constitute financial advice. Always conduct your own thorough research before making any investment decisions.</p>
         """
         QMessageBox.about(self, f"About {config.APP_NAME}", about_text)
 
-    def start_full_scan(self):
-        """Starts a full scan for all tickers."""
-        self.start_scan()
+    def run_demo_scan(self):
+        """Selects a demo scan and runs it."""
+        # Find the 'Golden Cross' button and click it programmatically
+        demo_strategy_id = 'golden_cross'
 
-    def start_single_ticker_scan(self):
-        """Starts a scan for a single, specified ticker."""
-        ticker = self.single_ticker_input.text().strip().upper()
-        if not ticker:
-            QMessageBox.warning(self, "Input Error", "Please enter a ticker to scan.")
-            return
-        self.start_scan(ticker=ticker)
+        for card in self.scan_cards:
+            if demo_strategy_id in card.sub_strategy_buttons:
+                # Ensure the button is checked visually
+                card.sub_strategy_buttons[demo_strategy_id].setChecked(True)
+                # Manually call the selection handler
+                self.on_strategy_selected(demo_strategy_id)
+                # Start the scan
+                self.start_scan()
+                return
 
-    def start_scan(self, ticker: str = None):
+        QMessageBox.warning(self, "Demo Error", "Could not find the 'Golden Cross' demo scan.")
+
+    def start_scan(self):
         """Sets up and starts the analysis worker thread."""
-        self.scan_button.setEnabled(False)
-        self.single_ticker_scan_button.setEnabled(False)
+        ticker = self.single_ticker_input.text().strip().upper() or None
+
+        if not self.activeScan:
+            QMessageBox.warning(self, "Selection Error", "Please select a scan strategy from the left pane.")
+            return
+
+        self.run_scan_button.setEnabled(False)
+        self.single_ticker_input.setEnabled(False)
         self.stop_scan_button.show()
         self.stop_scan_button.setEnabled(True)
-        self.clear_cache_button.setEnabled(False)
+        self.settings_button.setEnabled(False)
+
+        # Switch to results view and show progress
+        self.stacked_widget.setCurrentIndex(1) # 1 is the results_widget
+        self.scan_progress_label.setText("Starting scan...")
         self.status_bar.showMessage("Starting scan...")
         self.progress_bar.setValue(0)
         self.progress_bar.show()
 
-        selected_items = self.scenario_tree.selectedItems()
-        if not selected_items or selected_items[0].childCount() > 0:
-             QMessageBox.warning(self, "Selection Error", "Please select a specific scenario, not a group.")
-             self.scan_button.setEnabled(True)
-             self.single_ticker_scan_button.setEnabled(True)
-             return
-
-        selected_scenario_id = selected_items[0].data(0, Qt.ItemDataRole.UserRole)
+        selected_scenario_id = self.activeScan
 
         self.thread = QThread()
         self.worker = AnalysisWorker(selected_scenario=selected_scenario_id, ticker=ticker)
@@ -696,20 +1113,37 @@ class MainWindow(QMainWindow):
         self.thread.start()
 
     def scan_error(self, error_info):
-        """Shows a dialog box when an error occurs during the scan."""
+        """Shows a toast notification when an error occurs during the scan."""
         exctype, value, tb = error_info
+        error_message = f"An unexpected error occurred:\n\n{value}\n\nTraceback:\n{tb}"
+
         self.status_bar.showMessage(f"Scan Error: {value}")
-        self.scan_button.setEnabled(True)
-        self.single_ticker_scan_button.setEnabled(True)
+        self.run_scan_button.setEnabled(True)
+        self.single_ticker_input.setEnabled(True)
         self.stop_scan_button.hide()
         self.stop_scan_button.setEnabled(False)
-        self.clear_cache_button.setEnabled(True)
+        self.settings_button.setEnabled(True)
         self.progress_bar.hide()
-        QMessageBox.critical(self, "Scan Error", f"An unexpected error occurred:\n\n{value}\n\nTraceback:\n{tb}")
+
+        # Show the onboarding screen on error
+        self.stacked_widget.setCurrentIndex(0)
+
+        self.toast.show_toast(error_message)
+
+    def resizeEvent(self, event):
+        """Handle window resize events to reposition the toast."""
+        if hasattr(self, 'toast') and self.toast.isVisible():
+            toast_width = 350
+            toast_height = 120
+            x = self.width() - toast_width - 10
+            y = self.height() - toast_height - self.status_bar.height() - 10
+            self.toast.setGeometry(x, y, toast_width, toast_height)
+        super().resizeEvent(event)
 
     def update_status_text(self, message):
-        """Updates the text in the status bar."""
+        """Updates the text in the status bar and the progress label."""
         self.status_bar.showMessage(message)
+        self.scan_progress_label.setText(message)
 
     def update_progress_bar(self, percent):
         """Updates the progress bar value."""
@@ -717,47 +1151,67 @@ class MainWindow(QMainWindow):
 
     def display_results(self, results):
         """Receives the results (List[ReboundCandidate]) and displays them."""
+        self.scan_progress_label.setText("") # Clear progress text
+
+        # Update timestamp on successful scan
+        self.last_updated_label.setText(f"Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
         # Check if the scan was cancelled, otherwise show the count
         if self.worker and self.worker._is_cancelled:
              self.status_bar.showMessage(f"Scan stopped by user. {len(results)} candidates found before stopping.")
         else:
             self.status_bar.showMessage(f"Scan complete. Found {len(results)} candidates.")
 
-        self.scan_button.setEnabled(True)
-        self.single_ticker_scan_button.setEnabled(True)
+        self.run_scan_button.setEnabled(True)
+        self.single_ticker_input.setEnabled(True)
         self.stop_scan_button.hide()
         self.stop_scan_button.setEnabled(False)
-        self.clear_cache_button.setEnabled(True)
+        self.settings_button.setEnabled(True)
         self.progress_bar.hide()
 
         if not results:
             self.results_df = pd.DataFrame()
             self.table_view.setModel(None)
-            QMessageBox.information(self, "Scan Complete", "No potential candidates found.")
+
+            # Update and switch to No Results view
+            scenarios = ScenarioRunner.load_scenarios_config()
+            scenario_name = next((s['name'] for s in scenarios if s['id'] == self.activeScan), "the selected scan")
+            self.no_results_label.setText(f'No stocks matched your scan for "{scenario_name}".\nYou can try another strategy.')
+            self.stacked_widget.setCurrentIndex(2) # 2 is the no_results_widget
             return
+
+        # Switch to the results view if we aren't already there
+        self.stacked_widget.setCurrentIndex(1)
 
         # Convert list of ReboundCandidate objects to a list of dicts for the DataFrame
         # The main table will only show universally applicable columns.
         # Scenario-specific details (like RSI/Prox scores) are in the tooltip.
         display_results_list = []
+        scenarios = ScenarioRunner.load_scenarios_config()
+        scenario_name = next((s['name'] for s in scenarios if s['id'] == self.activeScan), "")
+
         for r in results:
             # Format ROE as a percentage string, handling None
             roe_val = r.fundamentals.get('roe')
             roe_str = f"{roe_val * 100:.2f}%" if roe_val is not None else "N/A"
 
+            # TODO: Fetch and add Change %
+            # TODO: Add placeholder for Sparkline
             res_dict = {
                 "Ticker": r.ticker,
                 "Name": r.fundamentals.get('name', 'N/A'),
-                "Scenario": r.scenario,
+                "Price": f"${r.technicals.get('price', 0):.2f}",
+                "Change %": "0.00%", # Placeholder
                 "Rebound Score": r.rebound_score,
                 "Tech. Score": r.technical_score,
                 "Fund. Score": r.fundamental_score,
                 "ROE": roe_str,
-                "Price": r.technicals.get('price', '-'),
+                "Sparkline": "" # Placeholder for the delegate
             }
             display_results_list.append(res_dict)
 
         self.results_df = pd.DataFrame(display_results_list)
+        self.results_summary_label.setText(f"Found {len(results)} results for \"{scenario_name}\" scan.")
         # Keep the original full candidate objects for charting and for detailed tooltips
         self.all_candidates_data = results
 
@@ -784,8 +1238,8 @@ class MainWindow(QMainWindow):
             pass # No score column
 
         has_results = not self.results_df.empty
-        self.export_csv_button.setEnabled(has_results)
-        self.export_excel_button.setEnabled(has_results)
+        self.export_csv_action.setEnabled(has_results)
+        self.export_xlsx_action.setEnabled(has_results)
 
 
     def open_chart_for_selection(self, index):
@@ -823,17 +1277,3 @@ class MainWindow(QMainWindow):
                 self.status_bar.showMessage(f"Data successfully exported to {path}", 5000)
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", f"Failed to export to Excel: {e}")
-
-    def clear_cache(self):
-        """Deletes the contents of the cache directory."""
-        reply = QMessageBox.question(self, "Confirm Cache Deletion",
-                                     f"Are you sure you want to delete all cached data from {config.CACHE_DIR}?",
-                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                     QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                shutil.rmtree(config.CACHE_DIR)
-                config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
-                self.status_bar.showMessage("Cache successfully cleared.", 5000)
-            except Exception as e:
-                QMessageBox.critical(self, "Cache Error", f"Failed to clear cache: {e}")
