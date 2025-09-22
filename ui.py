@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableView, QStatusBar, QFileDialog, QMessageBox, QHeaderView,
     QProgressBar, QComboBox, QLabel, QLineEdit, QSplitter, QTreeWidget, QTreeWidgetItem,
-    QStackedWidget, QButtonGroup
+    QStackedWidget, QButtonGroup, QDialog, QDialogButtonBox, QCheckBox
 )
 from datetime import datetime
 from PyQt6.QtCore import (
@@ -27,6 +27,7 @@ import mplfinance as mpf
 import asyncio
 import config
 import data_loader
+from settings_manager import settings
 from ticker_manager import TickerManagerDialog
 from data_structures import ReboundCandidate
 from rebound_scenarios import ScenarioRunner, calculate_rsi, calculate_sma, calculate_macd
@@ -572,12 +573,65 @@ class ScanCategoryCard(QFrame):
         for btn in self.sub_strategy_buttons.values():
             btn.setChecked(False)
 
+# --- Settings Dialog ---
+class SettingsDialog(QDialog):
+    """A dialog for configuring user settings."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Settings")
+        self.setMinimumWidth(400)
+
+        layout = QVBoxLayout(self)
+
+        # --- Theme Settings ---
+        self.theme_checkbox = QCheckBox("Enable Dark Mode")
+        self.theme_checkbox.setChecked(settings.get("theme") == "dark")
+        layout.addWidget(self.theme_checkbox)
+
+        # --- Cache Settings ---
+        clear_cache_button = QPushButton("Clear Scanner Cache")
+        clear_cache_button.clicked.connect(self.clear_cache)
+        layout.addWidget(clear_cache_button)
+
+        layout.addStretch()
+
+        # --- Dialog Buttons ---
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def accept(self):
+        """Saves the settings when the OK button is clicked."""
+        new_theme = "dark" if self.theme_checkbox.isChecked() else "light"
+        settings.set("theme", new_theme)
+        # Add other settings saving here
+        super().accept()
+
+    def clear_cache(self):
+        """Handles the cache clearing logic."""
+        reply = QMessageBox.question(self, "Confirm Cache Deletion",
+                                     f"Are you sure you want to delete all cached data from {config.CACHE_DIR}?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                     QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                # Use shutil to recursively remove the directory
+                shutil.rmtree(config.CACHE_DIR)
+                # Recreate the directory so the app doesn't crash
+                config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                QMessageBox.information(self, "Success", "Cache successfully cleared.")
+            except Exception as e:
+                QMessageBox.critical(self, "Cache Error", f"Failed to clear cache: {e}")
+
+
 class MainWindow(QMainWindow):
     """The main window of the application."""
     def __init__(self):
         super().__init__()
         self.setWindowTitle(config.APP_NAME)
         self.setGeometry(100, 100, 1200, 800)
+        self.apply_theme() # Apply theme at startup
 
         # Set window icon
         icon = QIcon.fromTheme("com.rectifex.GlobalReboundScreener")
@@ -1043,21 +1097,25 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def open_settings_dialog(self):
-        """
-        Opens a settings dialog.
-        For now, it just contains the 'Clear Cache' functionality.
-        """
-        reply = QMessageBox.question(self, "Confirm Cache Deletion",
-                                     f"Are you sure you want to delete all cached data from {config.CACHE_DIR}?",
-                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                     QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                shutil.rmtree(config.CACHE_DIR)
-                config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
-                self.status_bar.showMessage("Cache successfully cleared.", 5000)
-            except Exception as e:
-                QMessageBox.critical(self, "Cache Error", f"Failed to clear cache: {e}")
+        """Opens the new, comprehensive settings dialog."""
+        dialog = SettingsDialog(self)
+        if dialog.exec():
+            # If user clicked OK, apply changes that require a refresh
+            self.apply_theme()
+            self.status_bar.showMessage("Settings updated.", 3000)
+
+    def apply_theme(self):
+        """Loads and applies the current theme from settings."""
+        theme = settings.get("theme", "light")
+        stylesheet_path = Path(f"styles/{theme}.qss")
+        try:
+            if stylesheet_path.exists():
+                with open(stylesheet_path, "r") as f:
+                    self.setStyleSheet(f.read())
+            else:
+                logging.warning(f"Stylesheet not found: {stylesheet_path}")
+        except Exception as e:
+            logging.error(f"Failed to apply theme '{theme}': {e}")
 
     def show_about_dialog(self):
         """Shows a simple 'About' dialog."""
