@@ -53,7 +53,9 @@
                 "install -D data_loader.py /app/data_loader.py",
                 "install -D ticker_manager.py /app/ticker_manager.py",
                 "install -D config.py /app/config.py",
+                "install -D settings_manager.py /app/settings_manager.py",
                 "cp -r data /app/",
+                "cp -r styles /app/",
                 "install -D com.rectifex.GlobalReboundScreener.desktop /app/share/applications/com.rectifex.GlobalReboundScreener.desktop",
                 "install -D Rectifex_RB_Icon.svg /app/share/icons/hicolor/scalable/apps/com.rectifex.GlobalReboundScreener.svg"
             ],
