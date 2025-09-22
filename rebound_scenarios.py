@@ -788,7 +788,7 @@ class ScenarioRunner:
             if market != 'CUSTOM' and not ticker:
                 index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
                 if index_ticker:
-                    index_data = data_loader.get_stock_data(index_ticker)
+                    index_data = await data_loader.get_stock_data(index_ticker)
 
                 # Market Context Filter
                 if not passes_market_context_filter(index_data, config.MARKET_CONTEXT_SMA):
@@ -816,7 +816,7 @@ class ScenarioRunner:
                 if stock_info:
                     stock_info['ticker'] = ticker_val
 
-                stock_data = data_loader.get_stock_data(ticker_val)
+                stock_data = await data_loader.get_stock_data(ticker_val)
                 if stock_data is None or stock_data.empty: continue
 
                 fundamental_data = fundamental_data_map.get(ticker_val)
