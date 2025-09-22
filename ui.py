@@ -234,9 +234,10 @@ class ChartWindow(QWidget):
             history_df = candidate.history_df.copy()
             if not history_df.empty and config.CHART_HISTORY_MONTHS > 0:
                 cutoff_date = history_df.index.max() - pd.DateOffset(months=config.CHART_HISTORY_MONTHS)
-                plot_data = history_df.loc[cutoff_date:]
+                # Explicitly create a copy to avoid the SettingWithCopyWarning
+                plot_data = history_df.loc[cutoff_date:].copy()
             else:
-                plot_data = history_df
+                plot_data = history_df.copy()
             if 'SMA50' not in plot_data.columns: plot_data['SMA50'] = calculate_sma(plot_data['Close'], 50)
             if 'SMA200' not in plot_data.columns: plot_data['SMA200'] = calculate_sma(plot_data['Close'], 200)
             if 'RSI' not in plot_data.columns: plot_data['RSI'] = calculate_rsi(plot_data['Close'])
@@ -252,7 +253,10 @@ class ChartWindow(QWidget):
                 }
                 hlines_fib = dict(hlines=list(fib_levels.values()), colors=['#999999']*len(fib_levels), linestyle='-.', linewidths=0.6, alpha=0.9)
             gs = self.figure.add_gridspec(4, 1, height_ratios=[6, 1, 2, 2], hspace=0.05)
-            price_ax, volume_ax, rsi_ax, macd_ax = self.figure.add_subplot(gs[0,0]), self.figure.add_subplot(gs[1,0], sharex=price_ax), self.figure.add_subplot(gs[2,0], sharex=price_ax), self.figure.add_subplot(gs[3,0], sharex=price_ax)
+            price_ax = self.figure.add_subplot(gs[0, 0])
+            volume_ax = self.figure.add_subplot(gs[1, 0], sharex=price_ax)
+            rsi_ax = self.figure.add_subplot(gs[2, 0], sharex=price_ax)
+            macd_ax = self.figure.add_subplot(gs[3, 0], sharex=price_ax)
             for ax in [price_ax, volume_ax, rsi_ax]: ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
             add_plots = [
                 mpf.make_addplot(plot_data['RSI'], ax=rsi_ax), mpf.make_addplot(macd_line, ax=macd_ax),
