@@ -167,7 +167,7 @@ class ClassicOversoldScenario(BaseScenario):
     Implements the 'Classic Oversold' scan: Oversold RSI, near 200-SMA and 90-day-low.
     """
     def __init__(self, *args, **kwargs):
-        super().__init__("Classic Oversold", *args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculates all necessary indicators and adds them to the dataframe."""
@@ -262,7 +262,7 @@ class MeanReversionScenario(BaseScenario):
     signaling a potential "mean reversion" rebound.
     """
     def __init__(self, *args, **kwargs):
-        super().__init__("Mean Reversion (Bollinger Bands)", *args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculates Bollinger Bands and adds them to the dataframe."""
@@ -325,7 +325,7 @@ class VolatilitySqueezeScenario(BaseScenario):
     significantly. This often precedes a strong price breakout.
     """
     def __init__(self, *args, **kwargs):
-        super().__init__("Volatility Squeeze", *args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.squeeze_period = 125 # ~6 months
 
     def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -393,7 +393,7 @@ class MomentumBreakoutScenario(BaseScenario):
     Identifies stocks hitting new 52-week highs on high volume.
     """
     def __init__(self, *args, **kwargs):
-        super().__init__("Momentum Breakout", *args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.breakout_period = 252 # ~52 weeks
 
     def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -528,7 +528,7 @@ class GoldenCrossScenario(BaseScenario):
     where the 50-day SMA crosses above the 200-day SMA.
     """
     def __init__(self, *args, **kwargs):
-        super().__init__("Golden Cross", *args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.recency_days = 5 # Look for a cross within the last 5 days
         self.min_data_days = 200
 
@@ -651,7 +651,7 @@ class HighQualityDividendScenario(BaseScenario):
     Finds stocks with high, sustainable dividends and healthy financials.
     """
     def __init__(self, *args, **kwargs):
-        super().__init__("High-Quality Dividend", *args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.min_yield = 0.03 # Minimum 3% dividend yield
         self.max_payout_ratio = 0.7 # Payout ratio cannot exceed 70%
         self.max_debt_to_equity = 1.0 # Debt-to-equity should be below 1.0
@@ -747,7 +747,7 @@ class FundamentalDivergenceScenario(BaseScenario):
     creating a potential 'value' or 'contrarian' opportunity.
     """
     def __init__(self, *args, **kwargs):
-        super().__init__("Fundamental Divergence", *args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.scan_period = config.FD_PRICE_RANGE_PERIOD
 
     def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -892,7 +892,7 @@ class QualityPullbackScenario(BaseScenario):
     Implements the 'Quality Stock Pullback' scenario logic.
     """
     def __init__(self, *args, **kwargs):
-        super().__init__("Quality Stock Pullback", *args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculates all necessary indicators and adds them to the dataframe."""
