@@ -1073,11 +1073,11 @@ class ScenarioRunner:
 
     def _emit_progress(self, message: str):
         if self.progress_callback:
-            self.progress_callback(message)
+            self.progress_callback.emit(message)
 
     def _emit_percent(self, percent: int):
         if self.progress_percent_callback:
-            self.progress_percent_callback(percent)
+            self.progress_percent_callback.emit(percent)
 
     def _get_scenario_instance(self, scenario_id: str) -> Optional[BaseScenario]:
         """Factory method to create a scenario instance from its ID."""
