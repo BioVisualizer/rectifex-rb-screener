@@ -424,6 +424,7 @@ class ChartWindow(QWidget):
 
 
 from PyQt6.QtCore import QTimer, QPropertyAnimation, QEasingCurve, QRect
+from datetime import datetime
 # --- Main Application Window ---
 
 class ToastNotification(QFrame):
