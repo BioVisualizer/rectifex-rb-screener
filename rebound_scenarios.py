@@ -400,126 +400,54 @@ class MomentumBreakoutScenario(BaseScenario):
         """Calculates 52-week high and average volume."""
         if df is None or df.empty or len(df) < self.breakout_period:
             return pd.DataFrame()
-
         # Shift by 1 to compare today's price against yesterday's 52-week high
         df['High_52W'] = df['High'].shift(1).rolling(window=self.breakout_period).max()
         df['Avg_Volume_30D'] = df['Volume'].shift(1).rolling(window=30).mean()
         return df
 
-    def _calculate_score(self, volume_ratio: float, breakout_pct: float) -> int:
+    def _calculate_score(self, volume_ratio: float, breakout_pct: float) -> tuple[int, dict]:
         """Calculates a score based on volume surge and breakout strength."""
-        # Volume score: 1.5x avg vol = 0, 3x avg vol = 100
-        volume_score = ((volume_ratio - 1.5) / 1.5) * 100
-        volume_score = max(0, min(100, volume_score))
-
-        # Strength score: 0% breakout = 0, 5% breakout = 100
-        strength_score = (breakout_pct / 5.0) * 100
-        strength_score = max(0, min(100, strength_score))
-
-        # Weighted final score
+        volume_score = max(0, min(100, ((volume_ratio - 1.5) / 1.5) * 100))
+        strength_score = max(0, min(100, (breakout_pct / 5.0) * 100))
         final_score = int(0.6 * volume_score + 0.4 * strength_score)
-        return final_score
+        breakdown = {'volume_sub_score': int(volume_score), 'strength_sub_score': int(strength_score)}
+        return final_score, breakdown
 
-    async def run(self, ticker: str = None) -> List[ReboundCandidate]:
-        self._emit_progress(f"Starting '{self.name}' scan...")
-        if ticker:
-            all_tickers_by_market = {"CUSTOM": [ticker]}
-        else:
-            all_tickers_by_market = data_loader.get_all_tickers()
-        all_candidates = []
+    def run(self, stock_data: pd.DataFrame, fundamental_data: Dict, stock_info: Dict) -> Optional[ReboundCandidate]:
+        if stock_data is None or len(stock_data) < self.breakout_period:
+            return None
 
-        fundamental_handler = FundamentalDataHandler()
-        sector_stats = {}
-        if SECTOR_MEDIANS_FILE.exists():
-            with open(SECTOR_MEDIANS_FILE, 'r') as f:
-                sector_stats = json.load(f)
+        stock_data = self._prepare_dataframe(stock_data)
+        if stock_data.empty: return None
 
-        index_data_cache = {}
-        market_context_ok = {}
+        latest = stock_data.iloc[-1]
+        current_price, high_52w = latest.get('Close'), latest.get('High_52W')
+        current_volume, avg_volume = latest.get('Volume'), latest.get('Avg_Volume_30D')
 
-        for market, tickers in all_tickers_by_market.items():
-            if self.is_cancelled(): break
-            self._emit_progress(f"--- Processing Market: {market} ---")
+        if not (pd.notna(current_price) and pd.notna(high_52w) and pd.notna(current_volume) and pd.notna(avg_volume) and avg_volume > 0):
+            return None
 
-            index_data = None
-            if market != 'CUSTOM' and not ticker:
-                index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
-                if index_ticker:
-                    if index_ticker not in index_data_cache:
-                        index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
-                    index_data = index_data_cache[index_ticker]
+        if not (current_price > high_52w and current_volume > avg_volume * 1.5):
+            return None
 
-            self._emit_progress(f"Fetching fundamental data for {len(tickers)} tickers in {market}...")
-            fundamental_data_map = await fundamental_handler.get_fundamentals_for_tickers(
-                tickers, progress_callback=self._emit_progress, is_cancelled_callback=self.is_cancelled)
-            if self.is_cancelled(): break
+        self._emit_progress(f"!!! {stock_info['ticker']} is a potential '{self.name}' candidate.")
 
-            for ticker_val in tickers:
-                if self.is_cancelled(): break
+        volume_ratio = current_volume / avg_volume
+        breakout_pct = ((current_price - high_52w) / high_52w) * 100
+        technical_score, score_breakdown = self._calculate_score(volume_ratio, breakout_pct)
 
-                stock_info = get_ticker_info_cached(ticker_val)
-                if not passes_liquidity_filter(stock_info): continue
+        technicals_dict = {
+            'price': round(current_price, 2),
+            '52w_high': round(high_52w, 2),
+            'volume_ratio': round(volume_ratio, 2),
+            'breakout_pct': round(breakout_pct, 2),
+        }
 
-                stock_data = data_loader.get_stock_data(ticker_val)
-                if stock_data is None or len(stock_data) < self.breakout_period: continue
-
-                stock_data = self._prepare_dataframe(stock_data)
-                if stock_data.empty: continue
-
-                latest = stock_data.iloc[-1]
-                current_price = latest.get('Close')
-                high_52w = latest.get('High_52W')
-                current_volume = latest.get('Volume')
-                avg_volume = latest.get('Avg_Volume_30D')
-
-                is_candidate = False
-                if pd.notna(current_price) and pd.notna(high_52w) and pd.notna(current_volume) and pd.notna(avg_volume) and avg_volume > 0:
-                    if current_price > high_52w and current_volume > avg_volume * 1.5:
-                        is_candidate = True
-
-                if not is_candidate and not ticker:
-                    continue
-
-                self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate! Calculating scores...")
-
-                # --- Scoring ---
-                volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
-                breakout_pct = ((current_price - high_52w) / high_52w) * 100 if high_52w > 0 else 0
-                technical_score = self._calculate_score(volume_ratio, breakout_pct)
-
-                fundamental_data = fundamental_data_map.get(ticker_val)
-                fundamental_score, fund_breakdown = 0, {}
-                if fundamental_data and 'metrics' in fundamental_data:
-                    fundamental_score, fund_breakdown = compute_fundamental_score(
-                        fundamentals=fundamental_data['metrics'], sector=fundamental_data.get('sector', 'N/A'),
-                        sector_stats=sector_stats, weights=DEFAULT_FUNDAMENTAL_WEIGHTS)
-
-                market_context_score = compute_market_context_score(index_data)
-                rebound_score = compute_rebound_score(technical_score, fundamental_score, market_context_score, DEFAULT_REBOUND_SCORE_WEIGHTS)
-
-                if rebound_score < 1 and not ticker: continue
-
-                # --- Create Candidate ---
-                technicals_dict = {
-                    'price': round(current_price, 2) if pd.notna(current_price) else 'N/A',
-                    '52w_high': round(high_52w, 2) if pd.notna(high_52w) else 'N/A',
-                    'volume_ratio': round(volume_ratio, 2),
-                    'breakout_pct': round(breakout_pct, 2),
-                }
-                fundamentals_dict = fundamental_data.get('metrics', {}) if fundamental_data else {}
-                fundamentals_dict['name'] = stock_info.get('shortName', 'N/A')
-                score_breakdown_dict = {**fund_breakdown, 'volume_score': technical_score, 'breakout_strength_score': technical_score}
-
-                candidate = ReboundCandidate(
-                    ticker=ticker_val, scenario=self.name, rebound_score=rebound_score,
-                    technical_score=technical_score, fundamental_score=fundamental_score,
-                    market_context_score=market_context_score, history_df=stock_data,
-                    technicals=technicals_dict, fundamentals=fundamentals_dict,
-                    score_breakdown=score_breakdown_dict)
-                all_candidates.append(candidate)
-
-        self._emit_progress(f"Scan complete. Found {len(all_candidates)} candidates.")
-        return all_candidates
+        return ReboundCandidate(
+            ticker=stock_info['ticker'], scenario=self.name, rebound_score=0,
+            technical_score=technical_score, history_df=stock_data,
+            technicals=technicals_dict, score_breakdown=score_breakdown
+        )
 
 
 class GoldenCrossScenario(BaseScenario):
@@ -529,121 +457,61 @@ class GoldenCrossScenario(BaseScenario):
     """
     def __init__(self, *args, **kwargs):
         super().__init__("Golden Cross", *args, **kwargs)
-        self.recency_days = 5 # Look for a cross within the last 5 days
+        self.recency_days = 5
         self.min_data_days = 200
 
     def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculates 50-day and 200-day SMAs."""
         if df is None or df.empty or len(df) < self.min_data_days:
             return pd.DataFrame()
-
         df['SMA50'] = calculate_sma(df['Close'], 50)
         df['SMA200'] = calculate_sma(df['Close'], 200)
         return df
 
     def _calculate_score(self, days_ago: int) -> int:
         """Calculates score based on how recently the cross occurred."""
-        # A cross today (0 days ago) gets 100. A cross 4 days ago gets 20.
         score = 100 - (days_ago * 20)
-        return max(0, score)
+        return int(max(0, score))
 
-    async def run(self, ticker: str = None) -> List[ReboundCandidate]:
-        self._emit_progress(f"Starting '{self.name}' scan...")
-        if ticker:
-            all_tickers_by_market = {"CUSTOM": [ticker]}
-        else:
-            all_tickers_by_market = data_loader.get_all_tickers()
-        all_candidates = []
+    def run(self, stock_data: pd.DataFrame, fundamental_data: Dict, stock_info: Dict) -> Optional[ReboundCandidate]:
+        if stock_data is None or len(stock_data) < self.min_data_days:
+            return None
 
-        fundamental_handler = FundamentalDataHandler()
-        sector_stats = {}
-        if SECTOR_MEDIANS_FILE.exists():
-            with open(SECTOR_MEDIANS_FILE, 'r') as f:
-                sector_stats = json.load(f)
+        stock_data = self._prepare_dataframe(stock_data)
+        if stock_data.empty or 'SMA50' not in stock_data.columns or 'SMA200' not in stock_data.columns:
+            return None
 
-        index_data_cache = {}
-        market_context_ok = {}
+        recent_data = stock_data.tail(self.recency_days + 1)
+        if len(recent_data) < 2: return None
 
-        for market, tickers in all_tickers_by_market.items():
-            if self.is_cancelled(): break
-            self._emit_progress(f"--- Processing Market: {market} ---")
+        cross_found, days_ago = False, -1
+        for i in range(len(recent_data) - 1, 0, -1):
+            today, yesterday = recent_data.iloc[i], recent_data.iloc[i - 1]
+            if pd.notna(today['SMA50']) and pd.notna(today['SMA200']) and pd.notna(yesterday['SMA50']) and pd.notna(yesterday['SMA200']):
+                if today['SMA50'] > today['SMA200'] and yesterday['SMA50'] <= yesterday['SMA200']:
+                    days_ago = len(recent_data) - 1 - i
+                    cross_found = True
+                    break
 
-            index_data = None
-            if market != 'CUSTOM' and not ticker:
-                index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
-                if index_ticker:
-                    if index_ticker not in index_data_cache:
-                        index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
-                    index_data = index_data_cache[index_ticker]
+        if not cross_found:
+            return None
 
-            self._emit_progress(f"Fetching fundamental data for {len(tickers)} tickers in {market}...")
-            fundamental_data_map = await fundamental_handler.get_fundamentals_for_tickers(
-                tickers, progress_callback=self._emit_progress, is_cancelled_callback=self.is_cancelled)
-            if self.is_cancelled(): break
+        self._emit_progress(f"!!! {stock_info['ticker']} is a potential '{self.name}' candidate.")
 
-            for ticker_val in tickers:
-                if self.is_cancelled(): break
+        technical_score = self._calculate_score(days_ago)
+        latest = stock_data.iloc[-1]
+        technicals_dict = {
+            'price': round(latest['Close'], 2) if pd.notna(latest['Close']) else 'N/A',
+            'cross_days_ago': days_ago,
+            'sma_50': round(latest['SMA50'], 2) if pd.notna(latest['SMA50']) else 'N/A',
+            'sma_200': round(latest['SMA200'], 2) if pd.notna(latest['SMA200']) else 'N/A',
+        }
 
-                stock_info = get_ticker_info_cached(ticker_val)
-                if not passes_liquidity_filter(stock_info): continue
-
-                stock_data = data_loader.get_stock_data(ticker_val)
-                if stock_data is None or len(stock_data) < self.min_data_days: continue
-
-                stock_data = self._prepare_dataframe(stock_data)
-                if stock_data.empty or 'SMA50' not in stock_data.columns or 'SMA200' not in stock_data.columns: continue
-
-                recent_data = stock_data.tail(self.recency_days + 1)
-                if len(recent_data) < 2: continue
-
-                cross_found, days_ago = False, -1
-                for i in range(len(recent_data) - 1, 0, -1):
-                    today, yesterday = recent_data.iloc[i], recent_data.iloc[i - 1]
-                    if pd.notna(today['SMA50']) and pd.notna(today['SMA200']) and pd.notna(yesterday['SMA50']) and pd.notna(yesterday['SMA200']):
-                        if today['SMA50'] > today['SMA200'] and yesterday['SMA50'] <= yesterday['SMA200']:
-                            days_ago = len(recent_data) - 1 - i
-                            cross_found = True
-                            break
-
-                if not cross_found and not ticker: continue
-
-                self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate! Calculating scores...")
-
-                technical_score = self._calculate_score(days_ago) if cross_found else 0
-
-                fundamental_data = fundamental_data_map.get(ticker_val)
-                fundamental_score, fund_breakdown = 0, {}
-                if fundamental_data and 'metrics' in fundamental_data:
-                    fundamental_score, fund_breakdown = compute_fundamental_score(
-                        fundamentals=fundamental_data['metrics'], sector=fundamental_data.get('sector', 'N/A'),
-                        sector_stats=sector_stats, weights=DEFAULT_FUNDAMENTAL_WEIGHTS)
-
-                market_context_score = compute_market_context_score(index_data)
-                rebound_score = compute_rebound_score(technical_score, fundamental_score, market_context_score, DEFAULT_REBOUND_SCORE_WEIGHTS)
-
-                if rebound_score < 1 and not ticker: continue
-
-                latest = stock_data.iloc[-1]
-                technicals_dict = {
-                    'price': round(latest['Close'], 2) if pd.notna(latest['Close']) else 'N/A',
-                    'cross_days_ago': days_ago if cross_found else 'N/A',
-                    'sma_50': round(latest['SMA50'], 2) if pd.notna(latest['SMA50']) else 'N/A',
-                    'sma_200': round(latest['SMA200'], 2) if pd.notna(latest['SMA200']) else 'N/A',
-                }
-                fundamentals_dict = fundamental_data.get('metrics', {}) if fundamental_data else {}
-                fundamentals_dict['name'] = stock_info.get('shortName', 'N/A')
-                score_breakdown_dict = {**fund_breakdown, 'recency_score': technical_score}
-
-                candidate = ReboundCandidate(
-                    ticker=ticker_val, scenario=self.name, rebound_score=rebound_score,
-                    technical_score=technical_score, fundamental_score=fundamental_score,
-                    market_context_score=market_context_score, history_df=stock_data,
-                    technicals=technicals_dict, fundamentals=fundamentals_dict,
-                    score_breakdown=score_breakdown_dict)
-                all_candidates.append(candidate)
-
-        self._emit_progress(f"Scan complete. Found {len(all_candidates)} candidates.")
-        return all_candidates
+        return ReboundCandidate(
+            ticker=stock_info['ticker'], scenario=self.name, rebound_score=0,
+            technical_score=technical_score, history_df=stock_data,
+            technicals=technicals_dict, score_breakdown={'recency_sub_score': technical_score}
+        )
 
 
 class HighQualityDividendScenario(BaseScenario):
@@ -656,89 +524,42 @@ class HighQualityDividendScenario(BaseScenario):
         self.max_payout_ratio = 0.7 # Payout ratio cannot exceed 70%
         self.max_debt_to_equity = 1.0 # Debt-to-equity should be below 1.0
 
-    def _calculate_score(self, dividend_yield: float, debt_to_equity: float) -> int:
+    def _calculate_score(self, dividend_yield: float, debt_to_equity: float) -> tuple[int, dict]:
         """Score is based on yield strength and low debt."""
-        # Yield score (capped at 10% yield for scoring)
         yield_score = (min(dividend_yield, 0.10) / 0.10) * 100
-
-        # Debt score (lower is better, capped at 1.0 for scoring)
         debt_score = (1 - min(debt_to_equity, self.max_debt_to_equity)) * 100
-
-        # Weighted final score
         final_score = int(0.6 * yield_score + 0.4 * debt_score)
-        return max(0, min(100, final_score))
+        breakdown = {'yield_sub_score': int(yield_score), 'debt_sub_score': int(debt_score)}
+        return max(0, min(100, final_score)), breakdown
 
-    async def run(self, ticker: str = None) -> List[ReboundCandidate]:
-        self._emit_progress(f"Starting '{self.name}' scan...")
-        if ticker:
-            all_tickers_by_market = {"CUSTOM": [ticker]}
-        else:
-            all_tickers_by_market = data_loader.get_all_tickers()
-        all_candidates = []
+    def run(self, stock_data: pd.DataFrame, fundamental_data: Dict, stock_info: Dict) -> Optional[ReboundCandidate]:
+        if not (fundamental_data and 'metrics' in fundamental_data):
+            return None
 
-        fundamental_handler = FundamentalDataHandler()
-        sector_stats = {}
-        if SECTOR_MEDIANS_FILE.exists():
-            with open(SECTOR_MEDIANS_FILE, 'r') as f:
-                sector_stats = json.load(f)
+        fund_metrics = fundamental_data['metrics']
+        div_yield = fund_metrics.get('dividendYield')
+        payout = fund_metrics.get('payoutRatio')
+        debt = fund_metrics.get('debtToEquity')
 
-        for market, tickers in all_tickers_by_market.items():
-            if self.is_cancelled(): break
-            self._emit_progress(f"--- Processing Market: {market} ---")
+        if not all(v is not None for v in [div_yield, payout, debt]):
+            return None
 
-            self._emit_progress(f"Fetching fundamental data for {len(tickers)} tickers in {market}...")
-            fundamental_data_map = await fundamental_handler.get_fundamentals_for_tickers(
-                tickers, progress_callback=self._emit_progress, is_cancelled_callback=self.is_cancelled)
-            if self.is_cancelled(): break
+        if not (div_yield >= self.min_yield and 0 < payout < self.max_payout_ratio and debt < self.max_debt_to_equity):
+            return None
 
-            for ticker_val in tickers:
-                if self.is_cancelled(): break
+        self._emit_progress(f"!!! {stock_info['ticker']} is a potential '{self.name}' candidate.")
 
-                stock_info = get_ticker_info_cached(ticker_val)
-                if not passes_liquidity_filter(stock_info): continue
+        technical_score, score_breakdown = self._calculate_score(div_yield, debt)
 
-                fundamental_data = fundamental_data_map.get(ticker_val)
-                if not (fundamental_data and 'metrics' in fundamental_data): continue
+        technicals_dict = {
+            'price': round(stock_data['Close'].iloc[-1], 2) if not stock_data.empty else 'N/A'
+        }
 
-                fund_metrics = fundamental_data['metrics']
-                div_yield = fund_metrics.get('dividendYield')
-                payout = fund_metrics.get('payoutRatio')
-                debt = fund_metrics.get('debtToEquity')
-
-                is_candidate = False
-                if all(v is not None for v in [div_yield, payout, debt]):
-                    if div_yield >= self.min_yield and 0 < payout < self.max_payout_ratio and debt < self.max_debt_to_equity:
-                        is_candidate = True
-
-                if not is_candidate and not ticker: continue
-
-                self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate! Calculating scores...")
-
-                technical_score = self._calculate_score(div_yield or 0, debt or 1)
-
-                fundamental_score, fund_breakdown = compute_fundamental_score(
-                    fundamentals=fund_metrics, sector=fundamental_data.get('sector', 'N/A'),
-                    sector_stats=sector_stats, weights=DIVIDEND_SCENARIO_FUNDAMENTAL_WEIGHTS)
-
-                market_context_score = 50 # Neutral, as this is a fundamental scan
-                rebound_score = compute_rebound_score(technical_score, fundamental_score, market_context_score, DEFAULT_REBOUND_SCORE_WEIGHTS)
-
-                if rebound_score < 1 and not ticker: continue
-
-                stock_data = data_loader.get_stock_data(ticker_val)
-                fund_metrics['name'] = stock_info.get('shortName', 'N/A')
-
-                candidate = ReboundCandidate(
-                    ticker=ticker_val, scenario=self.name, rebound_score=rebound_score,
-                    technical_score=technical_score, fundamental_score=fundamental_score,
-                    market_context_score=market_context_score, history_df=stock_data,
-                    technicals={'price': round(stock_data['Close'].iloc[-1], 2) if not stock_data.empty else 'N/A'},
-                    fundamentals=fund_metrics,
-                    score_breakdown={**fund_breakdown, 'dividend_yield_score': technical_score})
-                all_candidates.append(candidate)
-
-        self._emit_progress(f"Scan complete. Found {len(all_candidates)} candidates.")
-        return all_candidates
+        return ReboundCandidate(
+            ticker=stock_info['ticker'], scenario=self.name, rebound_score=0,
+            technical_score=technical_score, history_df=stock_data,
+            technicals=technicals_dict, score_breakdown=score_breakdown
+        )
 
 
 class FundamentalDivergenceScenario(BaseScenario):
@@ -770,126 +591,73 @@ class FundamentalDivergenceScenario(BaseScenario):
 
         return df
 
-    async def run(self, ticker: str = None) -> List[ReboundCandidate]:
-        self._emit_progress(f"Starting '{self.name}' scan...")
-        if ticker:
-            all_tickers_by_market = {"CUSTOM": [ticker]}
-        else:
-            all_tickers_by_market = data_loader.get_all_tickers()
-        all_candidates = []
+    def run(self, stock_data: pd.DataFrame, fundamental_data: Dict, stock_info: Dict) -> Optional[ReboundCandidate]:
+        if stock_data is None or len(stock_data) < self.scan_period:
+            return None
 
-        fundamental_handler = FundamentalDataHandler()
+        # This scenario relies on a strong fundamental score, which is calculated later by the runner.
+        # We must pre-calculate it here to filter candidates, which is a special case for this scenario.
         sector_stats = {}
         if SECTOR_MEDIANS_FILE.exists():
             with open(SECTOR_MEDIANS_FILE, 'r') as f:
                 sector_stats = json.load(f)
 
-        index_data_cache = {}
+        prelim_fundamental_score = 0
+        if fundamental_data and 'metrics' in fundamental_data:
+            prelim_fundamental_score, _ = compute_fundamental_score(
+                fundamentals=fundamental_data['metrics'], sector=fundamental_data.get('sector', 'N/A'),
+                sector_stats=sector_stats, weights=DEFAULT_FUNDAMENTAL_WEIGHTS)
 
-        for market, tickers in all_tickers_by_market.items():
-            if self.is_cancelled(): break
-            self._emit_progress(f"--- Processing Market: {market} ---")
+        if prelim_fundamental_score < 50: # Pre-filter based on fundamental strength
+            return None
 
-            index_data = None
-            if market != 'CUSTOM' and not ticker:
-                index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), "SPY")
-                if index_ticker not in index_data_cache:
-                    index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
-                index_data = index_data_cache[index_ticker]
+        stock_data = self._prepare_dataframe(stock_data)
+        if stock_data.empty or 'SMA50' not in stock_data.columns or 'SMA200' not in stock_data.columns:
+            return None
 
-            self._emit_progress(f"Fetching fundamental data for {len(tickers)} tickers in {market}...")
-            fundamental_data_map = await fundamental_handler.get_fundamentals_for_tickers(
-                tickers, progress_callback=self._emit_progress, is_cancelled_callback=self.is_cancelled)
-            if self.is_cancelled(): break
+        latest = stock_data.iloc[-1]
+        if pd.isna(latest['SMA50']) or pd.isna(latest['SMA200']) or latest['SMA200'] <= 0:
+            return None
 
-            for ticker_val in tickers:
-                if self.is_cancelled(): break
+        # --- Technical Checks & Scoring ---
+        sma_diff_pct = abs(latest['SMA50'] - latest['SMA200']) / latest['SMA200']
+        price_range_120d = latest.get('PriceRange120D', 999)
 
-                stock_info = get_ticker_info_cached(ticker_val)
-                if not passes_liquidity_filter(stock_info): continue
+        range_score = 0
+        if price_range_120d <= config.FD_MAX_PRICE_RANGE_STRONG: range_score = 100
+        elif price_range_120d <= config.FD_MAX_PRICE_RANGE_WEAK: range_score = 50
 
-                stock_data = data_loader.get_stock_data(ticker_val)
-                if stock_data is None or len(stock_data) < self.scan_period: continue
+        sma_score = 0
+        if sma_diff_pct <= config.FD_MAX_SMA_DIFF_PERCENT: sma_score = 100
+        elif sma_diff_pct <= config.FD_MAX_SMA_DIFF_PERCENT * 2: sma_score = 50
 
-                stock_data = self._prepare_dataframe(stock_data)
-                if stock_data.empty or 'SMA50' not in stock_data.columns or 'SMA200' not in stock_data.columns: continue
+        # The original logic had a relative performance score, which is now handled by the
+        # market context score in the runner. We re-weight the remaining technical scores.
+        technical_score = int(range_score * 0.6 + sma_score * 0.4)
+        score_breakdown = {'range_sub_score': range_score, 'sma_sub_score': sma_score}
 
-                latest = stock_data.iloc[-1]
-                if pd.isna(latest['SMA50']) or pd.isna(latest['SMA200']) or latest['SMA200'] <= 0: continue
+        if technical_score < 50:
+            return None
 
-                # --- Technical Checks ---
-                sma_diff_pct = abs(latest['SMA50'] - latest['SMA200']) / latest['SMA200']
-                price_range_120d = latest.get('PriceRange120D', 999)
+        self._emit_progress(f"!!! {stock_info['ticker']} is a potential '{self.name}' candidate.")
 
-                relative_perf = 999
-                if index_data is not None and len(index_data) >= self.scan_period:
-                    stock_prices = stock_data['Close'].tail(self.scan_period)
-                    index_prices = index_data['Close'].tail(self.scan_period)
-                    if len(stock_prices) > 1 and len(index_prices) > 1:
-                        stock_perf = (stock_prices.iloc[-1] / stock_prices.iloc[0]) - 1
-                        index_perf = (index_prices.iloc[-1] / index_prices.iloc[0]) - 1
-                        relative_perf = stock_perf - index_perf
+        technicals_dict = {
+            'price': round(latest['Close'], 2),
+            'price_range_120d_pct': round(price_range_120d * 100, 2) if price_range_120d != 999 else 'N/A',
+            'sma50_vs_sma200_pct': round(sma_diff_pct * 100, 2),
+        }
 
-                # --- Technical Scoring ---
-                range_score = 0
-                if price_range_120d <= config.FD_MAX_PRICE_RANGE_STRONG: range_score = 100
-                elif price_range_120d <= config.FD_MAX_PRICE_RANGE_WEAK: range_score = 50
-
-                sma_score = 0
-                if sma_diff_pct <= config.FD_MAX_SMA_DIFF_PERCENT: sma_score = 100
-                elif sma_diff_pct <= config.FD_MAX_SMA_DIFF_PERCENT * 2: sma_score = 50
-
-                perf_score = 0
-                if relative_perf <= 0: perf_score = 100
-                elif relative_perf <= 0.05: perf_score = 50
-
-                technical_score = int(range_score * 0.4 + sma_score * 0.3 + perf_score * 0.3)
-                tech_breakdown = {'range_score': range_score, 'sma_score': sma_score, 'perf_score': perf_score}
-
-                if technical_score < 50 and not ticker: continue
-
-                # --- Fundamental & Final Scoring ---
-                self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate. Calculating scores...")
-                fundamental_data = fundamental_data_map.get(ticker_val)
-                fundamental_score, fund_breakdown = 0, {}
-                if fundamental_data and 'metrics' in fundamental_data:
-                    fundamental_score, fund_breakdown = compute_fundamental_score(
-                        fundamentals=fundamental_data['metrics'], sector=fundamental_data.get('sector', 'N/A'),
-                        sector_stats=sector_stats, weights=DEFAULT_FUNDAMENTAL_WEIGHTS)
-
-                if fundamental_score < 50 and not ticker: continue
-
-                market_context_score = compute_market_context_score(index_data)
-                rebound_score = compute_rebound_score(technical_score, fundamental_score, market_context_score, DEFAULT_REBOUND_SCORE_WEIGHTS)
-
-                if rebound_score < 1 and not ticker: continue
-
-                # --- Create Candidate ---
-                technicals_dict = {
-                    'price': round(latest['Close'], 2) if pd.notna(latest['Close']) else 'N/A',
-                    'price_range_120d_pct': round(price_range_120d * 100, 2) if price_range_120d != 999 else 'N/A',
-                    'sma50_vs_sma200_pct': round(sma_diff_pct * 100, 2),
-                    'relative_perf_vs_index_pct': round(relative_perf * 100, 2) if relative_perf != 999 else 'N/A'
-                }
-                fundamentals_dict = fundamental_data.get('metrics', {}) if fundamental_data else {}
-                fundamentals_dict['name'] = stock_info.get('shortName', 'N/A')
-                score_breakdown_dict = {**fund_breakdown, **tech_breakdown}
-
-                candidate = ReboundCandidate(
-                    ticker=ticker_val, scenario=self.name, rebound_score=rebound_score,
-                    technical_score=technical_score, fundamental_score=fundamental_score,
-                    market_context_score=market_context_score, history_df=stock_data,
-                    technicals=technicals_dict, fundamentals=fundamentals_dict,
-                    score_breakdown=score_breakdown_dict)
-                all_candidates.append(candidate)
-
-        self._emit_progress(f"Scan complete. Found {len(all_candidates)} candidates.")
-        return all_candidates
+        return ReboundCandidate(
+            ticker=stock_info['ticker'], scenario=self.name, rebound_score=0,
+            technical_score=technical_score, history_df=stock_data,
+            technicals=technicals_dict, score_breakdown=score_breakdown
+        )
 
 
 class QualityPullbackScenario(BaseScenario):
     """
-    Implements the 'Quality Stock Pullback' scenario logic.
+    Implements the 'Quality Stock Pullback' scenario logic. Finds strong stocks in an
+    uptrend that have temporarily pulled back to a key moving average.
     """
     def __init__(self, *args, **kwargs):
         super().__init__("Quality Stock Pullback", *args, **kwargs)
@@ -903,132 +671,45 @@ class QualityPullbackScenario(BaseScenario):
         df['SMA200'] = calculate_sma(df['Close'], config.SMA_SUPPORT_PERIOD)
         return df
 
-    async def run(self, ticker: str = None) -> List[ReboundCandidate]:
-        self._emit_progress(f"Starting '{self.name}' scan...")
-        if ticker:
-            all_tickers_by_market = {"CUSTOM": [ticker]}
+    def run(self, stock_data: pd.DataFrame, fundamental_data: Dict, stock_info: Dict) -> Optional[ReboundCandidate]:
+        if stock_data is None or len(stock_data) < 200:
+            return None
+
+        stock_data = self._prepare_dataframe(stock_data)
+        latest = stock_data.iloc[-1]
+
+        # Check for long-term uptrend: price > SMA200 and SMA50 > SMA200
+        if not (pd.notna(latest['Close']) and pd.notna(latest['SMA50']) and pd.notna(latest['SMA200']) and \
+                latest['Close'] > latest['SMA200'] and latest['SMA50'] > latest['SMA200']):
+            return None
+
+        # Check for pullback to SMA50
+        current_price, sma50 = latest['Close'], latest['SMA50']
+        dist_to_sma50 = -1
+        if pd.notna(current_price) and pd.notna(sma50) and sma50 > 0:
+            dist_to_sma50 = abs((current_price - sma50) / sma50) * 100
+            if dist_to_sma50 > 3.0: # Must be within a 3% band of the SMA50
+                return None
         else:
-            all_tickers_by_market = data_loader.get_all_tickers()
-        all_candidates = []
+            return None # Not a valid candidate if we can't calculate distance
 
-        # --- New: Setup for integrated scoring ---
-        fundamental_handler = FundamentalDataHandler()
-        sector_stats = {}
-        if SECTOR_MEDIANS_FILE.exists():
-            with open(SECTOR_MEDIANS_FILE, 'r') as f:
-                sector_stats = json.load(f)
-        # --- End New Setup ---
+        self._emit_progress(f"!!! {stock_info['ticker']} is a potential '{self.name}' candidate.")
 
-        index_data_cache = {}
-        market_context_ok = {}
+        # Score is based on proximity to the SMA50. Closer is better.
+        prox_score = 100 - (dist_to_sma50 / 3.0 * 100)
+        technical_score = int(max(0, min(100, prox_score)))
 
-        for market, tickers in all_tickers_by_market.items():
-            if self.is_cancelled(): break
-            self._emit_progress(f"--- Processing Market: {market} ---")
+        technicals_dict = {
+            'price': round(current_price, 2),
+            'rsi': round(latest['RSI'], 2) if pd.notna(latest['RSI']) else 'N/A',
+            'dist_sma_50': round(dist_to_sma50, 2)
+        }
 
-            index_data = None
-            if market != 'CUSTOM' and not ticker:
-                index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
-                if index_ticker:
-                    if index_ticker not in index_data_cache:
-                        index_data_cache[index_ticker] = data_loader.get_stock_data(index_ticker)
-                    index_data = index_data_cache[index_ticker]
-
-            # --- New: Fetch all fundamental data upfront ---
-            self._emit_progress(f"Fetching fundamental data for {len(tickers)} tickers in {market}...")
-            fundamental_data_map = await fundamental_handler.get_fundamentals_for_tickers(
-                tickers,
-                progress_callback=self._emit_progress,
-                is_cancelled_callback=self.is_cancelled
-            )
-            if self.is_cancelled(): break
-
-            # --- Main analysis loop ---
-            for ticker_val in tickers:
-                if self.is_cancelled(): break
-
-                # --- Technical Filtering (mostly same as before) ---
-                stock_info = get_ticker_info_cached(ticker_val)
-                if not passes_liquidity_filter(stock_info): continue
-
-                stock_data = data_loader.get_stock_data(ticker_val)
-                if stock_data is None or len(stock_data) < 200: continue
-
-                stock_data = self._prepare_dataframe(stock_data)
-                latest = stock_data.iloc[-1]
-
-                # Check for long-term uptrend
-                if not (pd.notna(latest['Close']) and pd.notna(latest['SMA50']) and pd.notna(latest['SMA200']) and \
-                        latest['Close'] > latest['SMA200'] and latest['SMA50'] > latest['SMA200']):
-                    continue
-
-                # Check for pullback to SMA50
-                current_price, sma50 = latest['Close'], latest['SMA50']
-                dist_to_sma50 = -1
-                is_pullback_candidate = False
-                if pd.notna(current_price) and pd.notna(sma50) and sma50 > 0:
-                    dist_to_sma50 = abs((current_price - sma50) / sma50) * 100
-                    if dist_to_sma50 <= 3.0: # Pullback signal
-                        is_pullback_candidate = True
-
-                if not is_pullback_candidate and not ticker:
-                    continue
-
-                # --- New Scoring Logic ---
-                self._emit_progress(f"!!! {ticker_val} is a potential '{self.name}' candidate. Calculating scores...")
-
-                # 1. Calculate Technical Score (based on old logic)
-                prox_score = 100 - (dist_to_sma50 / 3.0 * 100) if dist_to_sma50 != -1 else 0
-                technical_score = int(max(0, min(100, prox_score)))
-
-                # 2. Calculate Fundamental Score
-                fundamental_data = fundamental_data_map.get(ticker_val)
-                fundamental_score = 0
-                fund_breakdown = {}
-                if fundamental_data and 'metrics' in fundamental_data:
-                    fundamental_score, fund_breakdown = compute_fundamental_score(
-                        fundamentals=fundamental_data['metrics'],
-                        sector=fundamental_data.get('sector', 'N/A'),
-                        sector_stats=sector_stats,
-                        weights=DEFAULT_FUNDAMENTAL_WEIGHTS
-                    )
-
-                # 3. Get Market Context Score
-                market_context_score = compute_market_context_score(index_data)
-
-                # 4. Compute Final Rebound Score
-                rebound_score = compute_rebound_score(
-                    tech_score=technical_score,
-                    fund_score=fundamental_score,
-                    market_score=market_context_score,
-                    weights=DEFAULT_REBOUND_SCORE_WEIGHTS
-                )
-
-                if rebound_score < 1 and not ticker:
-                    continue
-
-                # --- Create Candidate ---
-                technicals_dict = {
-                    'price': round(current_price, 2) if pd.notna(current_price) else 'N/A',
-                    'rsi': round(latest['RSI'], 2) if pd.notna(latest['RSI']) else 'N/A',
-                    'dist_sma_50': round(dist_to_sma50, 2) if dist_to_sma50 != -1 else 'N/A'
-                }
-                fundamentals_dict = fundamental_data.get('metrics', {}) if fundamental_data else {}
-                fundamentals_dict['name'] = stock_info.get('shortName', 'N/A')
-
-                score_breakdown_dict = {**fund_breakdown, 'proximity_score': technical_score}
-
-                candidate = ReboundCandidate(
-                    ticker=ticker_val, scenario=self.name, rebound_score=rebound_score,
-                    technical_score=technical_score, fundamental_score=fundamental_score,
-                    market_context_score=market_context_score, history_df=stock_data,
-                    technicals=technicals_dict, fundamentals=fundamentals_dict,
-                    score_breakdown=score_breakdown_dict
-                )
-                all_candidates.append(candidate)
-
-        self._emit_progress(f"Scan complete. Found {len(all_candidates)} candidates.")
-        return all_candidates
+        return ReboundCandidate(
+            ticker=stock_info['ticker'], scenario=self.name, rebound_score=0,
+            technical_score=technical_score, history_df=stock_data,
+            technicals=technicals_dict, score_breakdown={'proximity_sub_score': technical_score}
+        )
 
 
 # --- Scenario Runner ---
