@@ -591,9 +591,9 @@ class FundamentalDivergenceScenario(BaseScenario):
         if fundamental_data and 'metrics' in fundamental_data:
             prelim_fundamental_score, _ = compute_fundamental_score(
                 fundamentals=fundamental_data['metrics'], sector=fundamental_data.get('sector', 'N/A'),
-                sector_stats=sector_stats, weights=DEFAULT_FUNDAMENTAL_WEIGHTS)
+                sector_stats=sector_stats, weights=DIVERGENCE_SCENARIO_FUNDAMENTAL_WEIGHTS)
 
-        if prelim_fundamental_score < 50:
+        if prelim_fundamental_score < 45:
             return None
 
         stock_data = self._prepare_dataframe(stock_data)
@@ -811,6 +811,10 @@ class ScenarioRunner:
                 # Get all data for the current ticker
                 stock_info = get_ticker_info_cached(ticker_val)
                 if not passes_liquidity_filter(stock_info): continue
+
+                # FIX: Add the ticker to the info dict so scenarios can access it.
+                if stock_info:
+                    stock_info['ticker'] = ticker_val
 
                 stock_data = data_loader.get_stock_data(ticker_val)
                 if stock_data is None or stock_data.empty: continue
