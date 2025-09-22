@@ -69,8 +69,10 @@ class FundamentalDataHandler:
         balance_sheet = stock.balance_sheet
         cashflow = stock.cashflow
 
-        if financials.empty or balance_sheet.empty or cashflow.empty:
-            logging.warning(f"Financial statements are missing for {stock.ticker}")
+        if financials is None or financials.empty or \
+           balance_sheet is None or balance_sheet.empty or \
+           cashflow is None or cashflow.empty:
+            logging.warning(f"Financial statements are missing or empty for {stock.ticker}")
             return None
 
         metrics = {}
@@ -136,32 +138,45 @@ class FundamentalDataHandler:
     async def _fetch_single_ticker(self, ticker: str) -> Optional[Dict[str, Any]]:
         """
         Fetches and processes fundamental data for a single ticker.
+        Includes a retry mechanism for transient network errors.
         This runs synchronous yfinance calls in a separate thread.
         """
-        try:
-            logging.info(f"Fetching fundamentals for {ticker} from yfinance.")
-            stock = await asyncio.to_thread(yf.Ticker, ticker)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                logging.info(f"Fetching fundamentals for {ticker} from yfinance (Attempt {attempt + 1}/{max_retries}).")
+                stock = await asyncio.to_thread(yf.Ticker, ticker)
 
-            # Run all blocking calls in a thread
-            metrics = await asyncio.to_thread(self._calculate_metrics, stock)
+                # Run all blocking calls in a thread
+                metrics = await asyncio.to_thread(self._calculate_metrics, stock)
 
-            if not metrics:
-                return None
+                if not metrics:
+                    # This indicates a soft failure (e.g., missing data), not a network error.
+                    # No need to retry in this case.
+                    return None
 
-            # Final structure as per spec
-            data_packet = {
-                "ticker": stock.ticker,
-                "last_update": datetime.now(timezone.utc).isoformat(),
-                "sector": stock.info.get('sector', 'N/A'),
-                "metrics": metrics
-            }
+                # Final structure as per spec
+                data_packet = {
+                    "ticker": stock.ticker,
+                    "last_update": datetime.now(timezone.utc).isoformat(),
+                    "sector": stock.info.get('sector', 'N/A'),
+                    "metrics": metrics
+                }
 
-            self._save_to_cache(ticker, data_packet)
-            return data_packet
+                self._save_to_cache(ticker, data_packet)
+                return data_packet # Success, exit the loop
 
-        except Exception as e:
-            logging.error(f"Failed to fetch or process data for {ticker}: {e}", exc_info=False)
-            return None
+            except Exception as e:
+                logging.warning(f"Attempt {attempt + 1} for {ticker} failed: {e}")
+                if attempt < max_retries - 1:
+                    # Wait with exponential backoff before retrying
+                    wait_time = (attempt + 1) * 2
+                    logging.info(f"Retrying in {wait_time} seconds...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logging.error(f"All {max_retries} attempts failed for {ticker}. Error: {e}", exc_info=False)
+
+        return None # Return None if all retries fail
 
     async def get_fundamentals_for_tickers(self, tickers: List[str],
                                            progress_callback: Optional[Callable] = None,
