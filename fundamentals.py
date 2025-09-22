@@ -198,7 +198,7 @@ class FundamentalDataHandler:
                 tickers_to_fetch.append(ticker)
 
         if not tickers_to_fetch:
-            if progress_callback: progress_callback("All fundamental data loaded from cache.")
+            if progress_callback: progress_callback.emit("All fundamental data loaded from cache.")
             return results
 
         async def fetch_with_semaphore(ticker: str):
