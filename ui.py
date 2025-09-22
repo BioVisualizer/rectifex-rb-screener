@@ -877,8 +877,11 @@ class MainWindow(QMainWindow):
 
     def update_context_pane_for_scan(self, strategy_id):
         # Clear the previous content
-        for i in reversed(range(self.scan_explanation_layout.count())):
-            self.scan_explanation_layout.itemAt(i).widget().setParent(None)
+        while self.scan_explanation_layout.count():
+            item = self.scan_explanation_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
 
         scenarios = ScenarioRunner.load_scenarios_config()
         scenario_data = next((s for s in scenarios if s['id'] == strategy_id), None)
