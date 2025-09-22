@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget, QButtonGroup, QDialog, QDialogButtonBox, QCheckBox
 )
 from datetime import datetime
+from pathlib import Path
 from PyQt6.QtCore import (
     QObject, QThread, pyqtSignal, QAbstractTableModel, Qt, QSortFilterProxyModel, QRegularExpression
 )
