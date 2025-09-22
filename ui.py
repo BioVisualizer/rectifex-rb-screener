@@ -984,11 +984,12 @@ class MainWindow(QMainWindow):
         scenarios = ScenarioRunner.load_scenarios_config()
 
         # Define icons for categories
+        # Using text instead of emojis to avoid font rendering issues in Flatpak
         icons = {
-            "Trend & Momentum": "📈",
-            "Contrarian & Reversion": "📉",
-            "Value & Fundamental": "💰",
-            "Volatility": "⚡️"
+            "Trend & Momentum": "[Trend]",
+            "Contrarian & Reversion": "[Reversion]",
+            "Value & Fundamental": "[Value]",
+            "Volatility": "[Volatility]"
         }
 
         # Group scenarios by the 'group' key
@@ -1004,7 +1005,7 @@ class MainWindow(QMainWindow):
             card = ScanCategoryCard(
                 title=group_name,
                 description=scenarios_in_group[0].get('group_description', ''), # Assuming first desc is fine
-                icon_char=icons.get(group_name, "❓"),
+                icon_char=icons.get(group_name, "[?]"),
                 sub_strategies=scenarios_in_group
             )
             card.strategySelected.connect(self.on_strategy_selected)
