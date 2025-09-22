@@ -24,7 +24,8 @@
                 {
                     "type": "file",
                     "url": "https://github.com/google/fonts/raw/main/ofl/notocoloremoji/NotoColorEmoji-Regular.ttf",
-                    "dest-filename": "NotoColorEmoji-Regular.ttf"
+                    "dest-filename": "NotoColorEmoji-Regular.ttf",
+                    "sha256": "be73479ba4fa277c89b85cd6c71717df30d9d0eff6da8c1e1a201e5b95459299"
                 }
             ]
         },
