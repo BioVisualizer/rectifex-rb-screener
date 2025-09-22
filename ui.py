@@ -7,7 +7,7 @@ import pandas as pd
 import shutil
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QTableView, QStatusBar, QFileDialog, QMessageBox, QHeaderV,
+    QPushButton, QTableView, QStatusBar, QFileDialog, QMessageBox, QHeaderView,
     QProgressBar, QComboBox, QLabel, QLineEdit, QSplitter, QTreeWidget, QTreeWidgetItem,
     QStackedWidget, QButtonGroup, QDialog, QDialogButtonBox, QCheckBox
 )
