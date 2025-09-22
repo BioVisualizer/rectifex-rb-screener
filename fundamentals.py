@@ -238,6 +238,35 @@ class FundamentalDataHandler:
             logging.warning("No valid fundamental data found to compute sector medians.")
             return
 
+    async def get_full_ticker_info(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetches the complete 'info' dictionary for a single ticker.
+        This is used for on-demand details like the company summary.
+        It uses a simple in-memory cache to avoid re-fetching during a session.
+        """
+        if not hasattr(self, '_info_cache'):
+            self._info_cache = {}
+
+        if ticker in self._info_cache:
+            logging.info(f"Loading full info for {ticker} from session cache.")
+            return self._info_cache[ticker]
+
+        try:
+            logging.info(f"Fetching full info for {ticker} from yfinance.")
+            stock = await asyncio.to_thread(yf.Ticker, ticker)
+            info = await asyncio.to_thread(getattr, stock, 'info')
+
+            if not info or info.get('marketCap') is None:
+                logging.warning(f"No valid info dictionary for {ticker}")
+                return None
+
+            self._info_cache[ticker] = info
+            return info
+
+        except Exception as e:
+            logging.error(f"Failed to fetch full info for {ticker}: {e}")
+            return None
+
         df = pd.DataFrame(all_metrics)
 
         # Metrics to compute medians for, as per spec
