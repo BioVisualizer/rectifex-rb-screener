@@ -253,6 +253,41 @@ class FundamentalDataHandler:
             logging.warning("No valid fundamental data found to compute sector medians.")
             return
 
+        df = pd.DataFrame(all_metrics)
+
+        # Metrics to compute medians for, as per spec
+        median_metrics = [
+            'revenue_3yr_cagr', 'eps_1y_growth', 'net_margin', 'roe',
+            'debt_equity', 'free_cashflow_yield', 'pe_ttm', 'ev_ebit'
+        ]
+
+        # Ensure columns exist, fill missing with NaN
+        for metric in median_metrics:
+            if metric not in df.columns:
+                df[metric] = np.nan
+
+        # Calculate medians and standard deviations
+        grouped = df.groupby('sector')[median_metrics]
+        sector_medians = grouped.median()
+        sector_std_devs = grouped.std()
+
+        # Combine into the desired final structure
+        output_data = {}
+        for sector in sector_medians.index:
+            medians = sector_medians.loc[sector].replace(np.nan, None).to_dict()
+            std_devs = sector_std_devs.loc[sector].replace(np.nan, None).to_dict()
+            output_data[sector] = {
+                "medians": medians,
+                "std_devs": std_devs
+            }
+
+        try:
+            with open(SECTOR_MEDIANS_FILE, 'w') as f:
+                json.dump(output_data, f, indent=2)
+            logging.info(f"Successfully saved sector stats (medians, stddevs) to {SECTOR_MEDIANS_FILE}")
+        except Exception as e:
+            logging.error(f"Failed to save sector stats file: {e}")
+
     async def get_full_ticker_info(self, ticker: str) -> Optional[Dict[str, Any]]:
         """
         Fetches the complete 'info' dictionary for a single ticker.
