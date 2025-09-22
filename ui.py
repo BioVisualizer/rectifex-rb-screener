@@ -540,7 +540,7 @@ class ScanCategoryCard(QFrame):
             btn = QPushButton(strategy['name'])
             btn.setObjectName("SubStrategyButton")
             btn.setCheckable(True)
-            btn.setAutoExclusive(True)
+            # setAutoExclusive is handled by the QButtonGroup in MainWindow
             btn.setStyleSheet("""
                 QPushButton#SubStrategyButton {
                     text-align: left;
@@ -588,6 +588,8 @@ class MainWindow(QMainWindow):
         self.results_df = pd.DataFrame()
         self.activeScan = None
         self.scan_cards = [] # To hold all card widgets
+        self.strategy_button_group = QButtonGroup(self)
+        self.strategy_button_group.setExclusive(True)
 
         # --- Layout and Widgets ---
         central_widget = QWidget()
@@ -874,11 +876,8 @@ class MainWindow(QMainWindow):
         self.results_df = pd.DataFrame()
         self.table_view.setModel(None)
 
-        # Uncheck buttons in all other cards
-        sender_card = self.sender()
-        for card in self.scan_cards:
-             if card is not sender_card:
-                card.uncheck_all()
+        # The QButtonGroup now handles unchecking other buttons automatically.
+        # No manual unchecking is needed.
 
         # Update the context pane
         self.update_context_pane_for_scan(strategy_id)
@@ -1017,6 +1016,8 @@ class MainWindow(QMainWindow):
                 sub_strategies=scenarios_in_group
             )
             card.strategySelected.connect(self.on_strategy_selected)
+            for btn in card.sub_strategy_buttons.values():
+                self.strategy_button_group.addButton(btn)
             self.card_layout.insertWidget(self.card_layout.count() - 1, card)
             self.scan_cards.append(card)
 

@@ -23,6 +23,7 @@ from scoring import (
     passes_market_context_filter,
     DEFAULT_FUNDAMENTAL_WEIGHTS,
     DIVIDEND_SCENARIO_FUNDAMENTAL_WEIGHTS,
+    DIVERGENCE_SCENARIO_FUNDAMENTAL_WEIGHTS,
     DEFAULT_REBOUND_SCORE_WEIGHTS,
 )
 
@@ -827,6 +828,8 @@ class ScenarioRunner:
                             # Select the correct weights for the scenario
                             if scenario_id == 'high_quality_dividend':
                                 weights = DIVIDEND_SCENARIO_FUNDAMENTAL_WEIGHTS
+                            elif scenario_id == 'fundamental_divergence':
+                                weights = DIVERGENCE_SCENARIO_FUNDAMENTAL_WEIGHTS
                             else:
                                 weights = DEFAULT_FUNDAMENTAL_WEIGHTS
 

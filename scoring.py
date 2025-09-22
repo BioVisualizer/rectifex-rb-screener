@@ -40,6 +40,15 @@ DIVIDEND_SCENARIO_FUNDAMENTAL_WEIGHTS = {
     'revenue_3yr_cagr': 0.10,
 }
 
+# Special weights for the divergence scan, focusing on quality over valuation
+DIVERGENCE_SCENARIO_FUNDAMENTAL_WEIGHTS = {
+    'revenue_3yr_cagr': 0.25,
+    'eps_1y_growth': 0.25,
+    'roe': 0.20,
+    'free_cashflow_yield': 0.15,
+    'debt_equity': 0.15,
+}
+
 DEFAULT_REBOUND_SCORE_WEIGHTS = {
     'tech': 0.55,
     'fund': 0.30,
