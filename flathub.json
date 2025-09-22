@@ -14,6 +14,21 @@
     ],
     "modules": [
         {
+            "name": "noto-color-emoji",
+            "buildsystem": "simple",
+            "build-commands": [
+                "install -d /app/share/fonts/truetype/noto",
+                "install -m644 NotoColorEmoji-Regular.ttf /app/share/fonts/truetype/noto/NotoColorEmoji-Regular.ttf"
+            ],
+            "sources": [
+                {
+                    "type": "file",
+                    "url": "https://github.com/google/fonts/raw/main/ofl/notocoloremoji/NotoColorEmoji-Regular.ttf",
+                    "dest-filename": "NotoColorEmoji-Regular.ttf"
+                }
+            ]
+        },
+        {
             "name": "rectifex-rb",
             "buildsystem": "simple",
             "build-options": {
