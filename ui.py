@@ -484,7 +484,14 @@ class ToastNotification(QFrame):
         self.hide()
 
     def show_details(self):
-        QMessageBox.critical(self, "Error Details", self.detailed_error)
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Icon.Critical)
+        msg_box.setWindowTitle("Error Details")
+        msg_box.setText("An unexpected error occurred during the scan.")
+        msg_box.setDetailedText(self.detailed_error)
+        # Ensure text is visible, especially in environments with unusual color palettes
+        msg_box.setStyleSheet("QLabel{color: black;} QTextEdit{color: black; background-color: white;}")
+        msg_box.exec()
 
 class ScanCategoryCard(QFrame):
     """
