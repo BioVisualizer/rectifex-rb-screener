@@ -33,10 +33,25 @@ from ticker_manager import TickerManagerDialog
 from data_structures import ReboundCandidate
 from rebound_scenarios import ScenarioRunner, calculate_rsi, calculate_sma, calculate_macd
 from scoring import DEFAULT_REBOUND_SCORE_WEIGHTS
+from fundamentals import FundamentalDataHandler
 
-# --- Worker Thread for Running Analysis ---
+# --- Worker Threads & Signals ---
 
-class WorkerSignals(QObject):
+class MainScanSignals(QObject):
+    """Defines the signals available from the main analysis worker thread."""
+    finished = pyqtSignal()
+    error = pyqtSignal(tuple)
+    result = pyqtSignal(list)
+    progress = pyqtSignal(str)
+    progress_percent = pyqtSignal(int)
+
+class TickerDetailSignals(QObject):
+    """Defines signals for the ticker detail fetching worker."""
+    finished = pyqtSignal()
+    error = pyqtSignal(tuple)
+    result = pyqtSignal(object) # Emits the 'info' dict
+
+class AnalysisWorker(QObject):
     """Defines the signals available from a running worker thread."""
     finished = pyqtSignal()
     error = pyqtSignal(tuple)
@@ -48,7 +63,7 @@ class AnalysisWorker(QObject):
     """Worker thread for running the stock analysis to prevent GUI freezing."""
     def __init__(self, selected_scenario: str, ticker: str = None):
         super().__init__()
-        self.signals = WorkerSignals()
+        self.signals = MainScanSignals()
         self.selected_scenario = selected_scenario
         self.ticker = ticker
         self._is_cancelled = False
@@ -70,6 +85,33 @@ class AnalysisWorker(QObject):
             # Run the selected scenario using the new generic method
             results = asyncio.run(runner.run_scan(self.selected_scenario, ticker=self.ticker))
             self.signals.result.emit(results)
+        except Exception as e:
+            import traceback
+            self.signals.error.emit((type(e), e, traceback.format_exc()))
+        finally:
+            self.signals.finished.emit()
+
+class TickerDetailWorker(QObject):
+    """
+    A dedicated worker to fetch full ticker details in the background
+    without freezing the UI.
+    """
+    def __init__(self, ticker: str):
+        super().__init__()
+        self.ticker = ticker
+        self.signals = TickerDetailSignals()
+
+    def run(self):
+        """
+        Executes the async fetch operation. asyncio.run creates its own
+        event loop for this thread.
+        """
+        try:
+            # We create a new handler instance within the thread
+            fund_handler = FundamentalDataHandler()
+            # This is a blocking call until the async function completes
+            info = asyncio.run(fund_handler.get_full_ticker_info(self.ticker))
+            self.signals.result.emit(info)
         except Exception as e:
             import traceback
             self.signals.error.emit((type(e), e, traceback.format_exc()))
@@ -914,13 +956,92 @@ class MainWindow(QMainWindow):
             self.run_scan_button.setEnabled(False)
 
     def on_ticker_selected(self, index):
-        """Handles a click on a ticker in the results table."""
+        """
+        Handles a click on a ticker in the results table.
+        This method now starts a background worker to fetch details
+        asynchronously without freezing the UI.
+        """
         if not index.isValid():
             return
         source_index = self.table_view.model().mapToSource(index)
-        if source_index.row() < len(self.all_candidates_data):
-            candidate = self.all_candidates_data[source_index.row()]
-            asyncio.create_task(self.update_context_pane_for_ticker(candidate))
+        if source_index.row() >= len(self.all_candidates_data):
+            return
+
+        candidate = self.all_candidates_data[source_index.row()]
+
+        # Show a loading message immediately in the context pane
+        self.context_stack.setCurrentIndex(1)
+        while self.ticker_detail_layout.count():
+            item = self.ticker_detail_layout.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+        loading_label = QLabel("Loading Ticker Details...")
+        loading_label.setObjectName("loadingLabel")
+        self.ticker_detail_layout.addWidget(loading_label)
+
+        # Setup and run the worker thread
+        self.detail_thread = QThread()
+        self.detail_worker = TickerDetailWorker(candidate.ticker)
+        self.detail_worker.moveToThread(self.detail_thread)
+
+        # Connect signals
+        self.detail_thread.started.connect(self.detail_worker.run)
+        self.detail_worker.signals.result.connect(self._populate_context_pane)
+        # TODO: Add a proper error handler for detail fetching
+        # self.detail_worker.signals.error.connect(self.detail_fetch_error)
+        self.detail_worker.signals.finished.connect(self.detail_thread.quit)
+        self.detail_worker.signals.finished.connect(self.detail_worker.deleteLater)
+        self.detail_thread.finished.connect(self.detail_thread.deleteLater)
+
+        self.detail_thread.start()
+
+    def _populate_context_pane(self, info: dict):
+        """
+        This slot receives the fetched ticker details from the worker
+        and updates the context pane UI. This method is guaranteed to
+        run in the main GUI thread.
+        """
+        # Clear the "Loading..." message
+        loading_label = self.ticker_detail_layout.findChild(QLabel, "loadingLabel")
+        if loading_label:
+            loading_label.setParent(None)
+
+        if not info:
+            error_label = QLabel(f"Could not load details.")
+            self.ticker_detail_layout.addWidget(error_label)
+            return
+
+        # Populate with new data
+        title = QLabel(f"<b>{info.get('shortName', info.get('symbol'))}</b> ({info.get('symbol')})")
+        title.setStyleSheet("font-size: 16px; margin-bottom: 5px;")
+
+        def format_market_cap(mc):
+            if mc is None: return "N/A"
+            if mc > 1_000_000_000_000: return f"${mc/1_000_000_000_000:.2f}T"
+            if mc > 1_000_000_000: return f"${mc/1_000_000_000:.2f}B"
+            if mc > 1_000_000: return f"${mc/1_000_000:.2f}M"
+            return f"${mc}"
+
+        pe_ratio = f"{info.get('trailingPE'):.2f}" if info.get('trailingPE') else "N/A"
+        div_yield = f"{info.get('dividendYield')*100:.2f}%" if info.get('dividendYield') else "N/A"
+
+        metrics_text = (
+            f"<b>Market Cap:</b> {format_market_cap(info.get('marketCap'))}<br>"
+            f"<b>P/E Ratio:</b> {pe_ratio}<br>"
+            f"<b>Dividend Yield:</b> {div_yield}"
+        )
+        metrics_label = QLabel(metrics_text)
+
+        bio_title = QLabel("<b>Company Bio</b>")
+        bio_title.setStyleSheet("color: #005a9e; margin-top: 10px;")
+        bio_text = QLabel(info.get('longBusinessSummary', 'No company summary available.'))
+        bio_text.setWordWrap(True)
+
+        self.ticker_detail_layout.addWidget(title)
+        self.ticker_detail_layout.addWidget(metrics_label)
+        self.ticker_detail_layout.addWidget(bio_title)
+        self.ticker_detail_layout.addWidget(bio_text)
+        self.ticker_detail_layout.addStretch()
 
     def on_strategy_selected(self, strategy_id):
         """Handles a click on any sub-strategy button from any card."""
@@ -1036,7 +1157,6 @@ class MainWindow(QMainWindow):
         self.ticker_detail_layout.addWidget(bio_title)
         self.ticker_detail_layout.addWidget(bio_text)
         self.ticker_detail_layout.addStretch()
-
 
     def populate_strategy_cards(self):
         """
