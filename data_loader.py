@@ -7,6 +7,8 @@ import yfinance as yf
 from datetime import datetime, timedelta
 from pathlib import Path
 import logging
+import asyncio
+import functools
 
 # Assuming config.py is in the same directory
 import config
@@ -191,36 +193,43 @@ def get_all_tickers() -> dict[str, list[str]]:
     # Convert sets to lists
     return {market: sorted(list(tickers)) for market, tickers in market_to_tickers.items()}
 
-def get_stock_data(ticker: str) -> pd.DataFrame | None:
+async def get_stock_data(ticker: str) -> pd.DataFrame | None:
     """
-    Downloads historical data for a single stock, using a local cache.
+    Asynchronously downloads historical data for a single stock, using a local cache.
     The cache for a ticker is valid for `config.CACHE_EXPIRY_HOURS`.
-    This version flattens MultiIndex columns from yfinance.
+    Blocking I/O operations (network, disk) are run in a separate thread.
     """
     ensure_cache_dir_exists()
     cache_file = config.CACHE_DIR / f"{ticker.replace('^', 'INDEX-')}.csv"
 
-    # Check if a valid cache file exists
+    # Check if a valid cache file exists (fast, can stay sync)
     if cache_file.exists():
         mod_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
         if datetime.now() - mod_time < timedelta(hours=config.CACHE_EXPIRY_HOURS):
             logging.info(f"Loading {ticker} data from cache.")
             try:
-                # The cached file should have a simple header now
-                df = pd.read_csv(cache_file, index_col='Date', parse_dates=['Date'])
+                loop = asyncio.get_running_loop()
+                # Use functools.partial to pass arguments to the blocking function in the executor
+                read_func = functools.partial(pd.read_csv, cache_file, index_col='Date', parse_dates=['Date'])
+                df = await loop.run_in_executor(None, read_func)
                 return df
             except Exception as e:
                 logging.warning(f"Could not read cache file for {ticker}, refetching. Error: {e}")
 
-    # If no valid cache, download from yfinance
-    logging.info(f"Downloading {ticker} data from yfinance.")
+    # If no valid cache, download from yfinance in a separate thread
+    logging.info(f"Downloading {ticker} data from yfinance for period: {config.DATA_PERIOD}.")
     try:
-        data = yf.download(
-            ticker,
+        loop = asyncio.get_running_loop()
+        # yf.download is a blocking I/O function, so run it in an executor
+        download_func = functools.partial(
+            yf.download,
+            tickers=ticker,
             period=config.DATA_PERIOD,
             auto_adjust=True,
             progress=False
         )
+        data = await loop.run_in_executor(None, download_func)
+
         if data.empty:
             logging.warning(f"No data returned from yfinance for ticker: {ticker}")
             return None
@@ -232,12 +241,13 @@ def get_stock_data(ticker: str) -> pd.DataFrame | None:
         # Drop rows with NaN values which can be returned by yfinance
         data.dropna(inplace=True)
 
-        # Save to cache with a simple header
-        data.to_csv(cache_file)
+        # Save to cache in an executor as well to avoid blocking
+        save_func = functools.partial(data.to_csv, cache_file)
+        await loop.run_in_executor(None, save_func)
         logging.info(f"Saved {ticker} data to cache.")
         return data
     except Exception as e:
-        logging.error(f"Failed to download data for {ticker}: {e}")
+        logging.error(f"Failed to download data for {ticker}: {e}", exc_info=True)
         return None
 
 if __name__ == '__main__':
