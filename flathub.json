@@ -18,7 +18,8 @@
             "buildsystem": "simple",
             "build-commands": [
                 "install -d /app/share/fonts/truetype/noto",
-                "install -m644 NotoColorEmoji-Regular.ttf /app/share/fonts/truetype/noto/NotoColorEmoji-Regular.ttf"
+                "install -m644 NotoColorEmoji-Regular.ttf /app/share/fonts/truetype/noto/NotoColorEmoji-Regular.ttf",
+                "fc-cache -f -v"
             ],
             "sources": [
                 {
