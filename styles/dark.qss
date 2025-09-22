@@ -1,0 +1,78 @@
+/* styles/dark.qss - Dark Theme Stylesheet */
+
+QWidget {
+    background-color: #2b2b2b;
+    color: #f0f0f0;
+}
+
+QMainWindow, QDialog {
+    background-color: #2b2b2b;
+}
+
+QTableView {
+    background-color: #3c3f41;
+    border: 1px solid #555555;
+    gridline-color: #4a4a4a;
+    color: #f0f0f0;
+}
+
+QHeaderView::section {
+    background-color: #333333;
+    border-bottom: 1px solid #555555;
+    padding: 4px;
+    color: #f0f0f0;
+}
+
+QPushButton {
+    background-color: #4a4a4a;
+    border: 1px solid #666666;
+    padding: 5px;
+    border-radius: 2px;
+    color: #f0f0f0;
+}
+
+QPushButton:hover {
+    background-color: #5a5a5a;
+}
+
+QPushButton:pressed {
+    background-color: #6a6a6a;
+}
+
+QPushButton#btn-run-scan {
+    background-color: #3498db;
+    color: white;
+    font-weight: bold;
+    border: none;
+}
+
+QPushButton#btn-run-scan:hover {
+    background-color: #4ca9e9;
+}
+
+QLineEdit, QComboBox {
+    background-color: #3c3f41;
+    border: 1px solid #666666;
+    padding: 3px;
+    color: #f0f0f0;
+}
+
+QFrame#ScanCategoryCard {
+    background-color: #3c3f41;
+    border: 1px solid #555555;
+    border-radius: 8px;
+}
+
+QWidget#selection-pane {
+    background-color: #333333;
+}
+
+QWidget#context-pane {
+    background-color: #333333;
+    border-left: 1px solid #555555;
+}
+
+/* Specific fix for error dialog text */
+QMessageBox QLabel, QMessageBox QTextEdit {
+    color: #f0f0f0;
+}

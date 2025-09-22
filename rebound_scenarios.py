@@ -774,12 +774,6 @@ class ScenarioRunner:
         total_tickers = sum(len(t) for t in all_tickers_by_market.values())
         processed_tickers = 0
 
-        # Pre-load sector stats once
-        sector_stats = {}
-        if SECTOR_MEDIANS_FILE.exists():
-            with open(SECTOR_MEDIANS_FILE, 'r') as f:
-                sector_stats = json.load(f)
-
         for market, tickers in all_tickers_by_market.items():
             if self.is_cancelled(): break
             self._emit_progress(f"--- Processing Market: {market} ({len(tickers)} tickers) ---")
@@ -797,9 +791,24 @@ class ScenarioRunner:
                     continue
 
             # --- Centralized Data Fetching ---
-            self._emit_progress(f"Fetching fundamental data for {len(tickers)} tickers...")
+            self._emit_progress(f"Fetching fundamental data for {len(tickers)} tickers in {market}...")
             fundamental_data_map = await self.fundamental_handler.get_fundamentals_for_tickers(
                 tickers, self.progress_callback, self.is_cancelled)
+
+            # --- Compute Sector Medians ---
+            # This is critical. After fetching all data, we compute the aggregate
+            # statistics before starting the analysis.
+            self._emit_progress(f"Calculating sector medians for {market}...")
+            self.fundamental_handler.compute_and_save_sector_medians()
+
+            # --- Pre-load sector stats for the upcoming analysis ---
+            sector_stats = {}
+            if SECTOR_MEDIANS_FILE.exists():
+                with open(SECTOR_MEDIANS_FILE, 'r') as f:
+                    sector_stats = json.load(f)
+            else:
+                self._emit_progress(f"Warning: Could not load sector medians after calculation.")
+
 
             # --- Analysis Loop ---
             for ticker_val in tickers:
