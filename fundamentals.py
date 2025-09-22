@@ -210,7 +210,7 @@ class FundamentalDataHandler:
 
                 fetched_count += 1
                 if progress_callback:
-                    progress_callback(f"Fetched fundamentals for {ticker} ({fetched_count}/{total_to_fetch})")
+                    progress_callback.emit(f"Fetched fundamentals for {ticker} ({fetched_count}/{total_to_fetch})")
             except asyncio.CancelledError:
                 pass
 
