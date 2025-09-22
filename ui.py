@@ -392,6 +392,27 @@ class ChartWindow(QWidget):
                 mpf.make_addplot(macd_hist, type='bar', ax=macd_ax, color='grey', alpha=0.5)
             ]
 
+            # --- Select Chart Style ---
+            chart_style = 'yahoo'
+            if settings.get('theme') == 'dark':
+                chart_style = 'nightclouds'
+                # Also update the figure's facecolor to match the dark theme
+                self.figure.patch.set_facecolor('#2b2b2b')
+                # Update text colors for dark mode
+                price_ax.tick_params(axis='y', colors='white')
+                volume_ax.tick_params(axis='y', colors='white')
+                rsi_ax.tick_params(axis='y', colors='white')
+                macd_ax.tick_params(axis='y', colors='white')
+                macd_ax.tick_params(axis='x', colors='white')
+                price_ax.yaxis.label.set_color('white')
+                volume_ax.yaxis.label.set_color('white')
+                rsi_ax.yaxis.label.set_color('white')
+                macd_ax.yaxis.label.set_color('white')
+                self.figure.suptitle(f'{candidate.ticker} - {candidate.scenario}', y=0.98, color='white')
+            else:
+                self.figure.suptitle(f'{candidate.ticker} - {candidate.scenario}', y=0.98, color='black')
+
+
             # The main plot call uses the main axes and adds the others.
             mpf.plot(plot_data,
                      type='candle',
@@ -399,7 +420,7 @@ class ChartWindow(QWidget):
                      volume=volume_ax,
                      mav=(50, 200),
                      addplot=add_plots,
-                     style='yahoo',
+                     style=chart_style,
                      xrotation=20,
                      hlines=hlines_fib if hlines_fib else None)
 
@@ -452,8 +473,15 @@ class ChartWindow(QWidget):
             info_parts = [f"Scenario: {candidate.scenario}", price_str, rsi_str, eps_growth_str, rev_growth_str]
             info_text = " | ".join(filter(None, info_parts))
 
+            # Adjust info text color and background based on theme
+            info_text_color = '#333333'
+            info_bbox_color = 'yellow'
+            if settings.get('theme') == 'dark':
+                info_text_color = '#dcdcdc'
+                info_bbox_color = '#4a4a4a'
+
             self.figure.text(0.5, 0.94, info_text, ha='center', va='center', fontsize=8,
-                             color='#333333', bbox=dict(boxstyle='round,pad=0.4', fc='yellow', alpha=0.5, ec='none'))
+                             color=info_text_color, bbox=dict(boxstyle='round,pad=0.4', fc=info_bbox_color, alpha=0.8, ec='none'))
 
             self.figure.subplots_adjust(top=0.90, bottom=0.08, left=0.08, right=0.95, hspace=0.15)
             self.canvas.draw()
