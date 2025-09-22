@@ -9,10 +9,8 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableView, QStatusBar, QFileDialog, QMessageBox, QHeaderView,
     QProgressBar, QComboBox, QLabel, QLineEdit, QSplitter, QTreeWidget, QTreeWidgetItem,
-    QStackedWidget, QButtonGroup, QDialog, QDialogButtonBox, QCheckBox
+    QStackedWidget
 )
-from datetime import datetime
-from pathlib import Path
 from PyQt6.QtCore import (
     QObject, QThread, pyqtSignal, QAbstractTableModel, Qt, QSortFilterProxyModel, QRegularExpression
 )
@@ -28,34 +26,26 @@ import mplfinance as mpf
 import asyncio
 import config
 import data_loader
-from settings_manager import settings
 from ticker_manager import TickerManagerDialog
 from data_structures import ReboundCandidate
 from rebound_scenarios import ScenarioRunner, calculate_rsi, calculate_sma, calculate_macd
 from scoring import DEFAULT_REBOUND_SCORE_WEIGHTS
-from fundamentals import FundamentalDataHandler
 
-# --- Worker Threads & Signals ---
+# --- Worker Thread for Running Analysis ---
 
-class MainScanSignals(QObject):
-    """Defines the signals available from the main analysis worker thread."""
+class WorkerSignals(QObject):
+    """Defines the signals available from a running worker thread."""
     finished = pyqtSignal()
     error = pyqtSignal(tuple)
     result = pyqtSignal(list)
     progress = pyqtSignal(str)
     progress_percent = pyqtSignal(int)
 
-class TickerDetailSignals(QObject):
-    """Defines signals for the ticker detail fetching worker."""
-    finished = pyqtSignal()
-    error = pyqtSignal(tuple)
-    result = pyqtSignal(object) # Emits the 'info' dict
-
 class AnalysisWorker(QObject):
     """Worker thread for running the stock analysis to prevent GUI freezing."""
     def __init__(self, selected_scenario: str, ticker: str = None):
         super().__init__()
-        self.signals = MainScanSignals()
+        self.signals = WorkerSignals()
         self.selected_scenario = selected_scenario
         self.ticker = ticker
         self._is_cancelled = False
@@ -77,33 +67,6 @@ class AnalysisWorker(QObject):
             # Run the selected scenario using the new generic method
             results = asyncio.run(runner.run_scan(self.selected_scenario, ticker=self.ticker))
             self.signals.result.emit(results)
-        except Exception as e:
-            import traceback
-            self.signals.error.emit((type(e), e, traceback.format_exc()))
-        finally:
-            self.signals.finished.emit()
-
-class TickerDetailWorker(QObject):
-    """
-    A dedicated worker to fetch full ticker details in the background
-    without freezing the UI.
-    """
-    def __init__(self, ticker: str):
-        super().__init__()
-        self.ticker = ticker
-        self.signals = TickerDetailSignals()
-
-    def run(self):
-        """
-        Executes the async fetch operation. asyncio.run creates its own
-        event loop for this thread.
-        """
-        try:
-            # We create a new handler instance within the thread
-            fund_handler = FundamentalDataHandler()
-            # This is a blocking call until the async function completes
-            info = asyncio.run(fund_handler.get_full_ticker_info(self.ticker))
-            self.signals.result.emit(info)
         except Exception as e:
             import traceback
             self.signals.error.emit((type(e), e, traceback.format_exc()))
@@ -395,9 +358,6 @@ class ChartWindow(QWidget):
                      xrotation=20,
                      hlines=hlines_fib if hlines_fib else None)
 
-            # --- Final Styling ---
-            self.figure.suptitle(f'{candidate.ticker} - {candidate.scenario}', y=0.98)
-
             # --- Add Fibonacci Labels ---
             if fib_levels:
                 # Use a transform that combines data y-coords with axes x-coords
@@ -524,14 +484,7 @@ class ToastNotification(QFrame):
         self.hide()
 
     def show_details(self):
-        msg_box = QMessageBox(self)
-        msg_box.setIcon(QMessageBox.Icon.Critical)
-        msg_box.setWindowTitle("Error Details")
-        msg_box.setText("An unexpected error occurred during the scan.")
-        msg_box.setDetailedText(self.detailed_error)
-        # Ensure text is visible, especially in environments with unusual color palettes
-        msg_box.setStyleSheet("QLabel{color: black;} QTextEdit{color: black; background-color: white;}")
-        msg_box.exec()
+        QMessageBox.critical(self, "Error Details", self.detailed_error)
 
 class ScanCategoryCard(QFrame):
     """
@@ -579,7 +532,7 @@ class ScanCategoryCard(QFrame):
             btn = QPushButton(strategy['name'])
             btn.setObjectName("SubStrategyButton")
             btn.setCheckable(True)
-            # setAutoExclusive is handled by the QButtonGroup in MainWindow
+            btn.setAutoExclusive(True)
             btn.setStyleSheet("""
                 QPushButton#SubStrategyButton {
                     text-align: left;
@@ -611,80 +564,6 @@ class ScanCategoryCard(QFrame):
         for btn in self.sub_strategy_buttons.values():
             btn.setChecked(False)
 
-# --- Settings Dialog ---
-class SettingsDialog(QDialog):
-    """A dialog for configuring user settings."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Settings")
-        self.setMinimumWidth(400)
-
-        layout = QVBoxLayout(self)
-
-        # --- Language Settings ---
-        lang_layout = QHBoxLayout()
-        lang_label = QLabel("UI Language:")
-        self.lang_combo = QComboBox()
-
-        # Add items with user-facing text and internal language codes
-        self.lang_combo.addItem("English", "en")
-        self.lang_combo.addItem("German (Deutsch)", "de")
-        self.lang_combo.addItem("Spanish (Español)", "es")
-
-        lang_layout.addWidget(lang_label)
-        lang_layout.addWidget(self.lang_combo)
-        layout.addLayout(lang_layout)
-
-        # Set the current selection based on saved settings
-        current_lang = settings.get("language", "en")
-        index = self.lang_combo.findData(current_lang)
-        if index != -1:
-            self.lang_combo.setCurrentIndex(index)
-
-        layout.addSpacing(20)
-
-        # --- Cache Settings ---
-        clear_cache_button = QPushButton("Clear Scanner Cache")
-        clear_cache_button.clicked.connect(self.clear_cache)
-        layout.addWidget(clear_cache_button)
-
-        layout.addStretch()
-
-        # --- Dialog Buttons ---
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-
-    def accept(self):
-        """Saves the settings when the OK button is clicked."""
-        # Save the selected language
-        selected_lang_code = self.lang_combo.currentData()
-        settings.set("language", selected_lang_code)
-
-        # Inform the user that a restart is needed for the language change
-        QMessageBox.information(self, "Restart Required",
-                                "The language change will take effect the next time you start the application.")
-
-        super().accept()
-
-    def clear_cache(self):
-        """Handles the cache clearing logic."""
-        reply = QMessageBox.question(self, "Confirm Cache Deletion",
-                                     f"Are you sure you want to delete all cached data from {config.CACHE_DIR}?",
-                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                     QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                # Use shutil to recursively remove the directory
-                shutil.rmtree(config.CACHE_DIR)
-                # Recreate the directory so the app doesn't crash
-                config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
-                QMessageBox.information(self, "Success", "Cache successfully cleared.")
-            except Exception as e:
-                QMessageBox.critical(self, "Cache Error", f"Failed to clear cache: {e}")
-
-
 class MainWindow(QMainWindow):
     """The main window of the application."""
     def __init__(self):
@@ -701,8 +580,6 @@ class MainWindow(QMainWindow):
         self.results_df = pd.DataFrame()
         self.activeScan = None
         self.scan_cards = [] # To hold all card widgets
-        self.strategy_button_group = QButtonGroup(self)
-        self.strategy_button_group.setExclusive(True)
 
         # --- Layout and Widgets ---
         central_widget = QWidget()
@@ -972,92 +849,13 @@ class MainWindow(QMainWindow):
             self.run_scan_button.setEnabled(False)
 
     def on_ticker_selected(self, index):
-        """
-        Handles a click on a ticker in the results table.
-        This method now starts a background worker to fetch details
-        asynchronously without freezing the UI.
-        """
+        """Handles a click on a ticker in the results table."""
         if not index.isValid():
             return
         source_index = self.table_view.model().mapToSource(index)
-        if source_index.row() >= len(self.all_candidates_data):
-            return
-
-        candidate = self.all_candidates_data[source_index.row()]
-
-        # Show a loading message immediately in the context pane
-        self.context_stack.setCurrentIndex(1)
-        while self.ticker_detail_layout.count():
-            item = self.ticker_detail_layout.takeAt(0)
-            if item.widget():
-                item.widget().setParent(None)
-        loading_label = QLabel("Loading Ticker Details...")
-        loading_label.setObjectName("loadingLabel")
-        self.ticker_detail_layout.addWidget(loading_label)
-
-        # Setup and run the worker thread
-        self.detail_thread = QThread()
-        self.detail_worker = TickerDetailWorker(candidate.ticker)
-        self.detail_worker.moveToThread(self.detail_thread)
-
-        # Connect signals
-        self.detail_thread.started.connect(self.detail_worker.run)
-        self.detail_worker.signals.result.connect(self._populate_context_pane)
-        # TODO: Add a proper error handler for detail fetching
-        # self.detail_worker.signals.error.connect(self.detail_fetch_error)
-        self.detail_worker.signals.finished.connect(self.detail_thread.quit)
-        self.detail_worker.signals.finished.connect(self.detail_worker.deleteLater)
-        self.detail_thread.finished.connect(self.detail_thread.deleteLater)
-
-        self.detail_thread.start()
-
-    def _populate_context_pane(self, info: dict):
-        """
-        This slot receives the fetched ticker details from the worker
-        and updates the context pane UI. This method is guaranteed to
-        run in the main GUI thread.
-        """
-        # Clear the "Loading..." message
-        loading_label = self.ticker_detail_layout.findChild(QLabel, "loadingLabel")
-        if loading_label:
-            loading_label.setParent(None)
-
-        if not info:
-            error_label = QLabel(f"Could not load details.")
-            self.ticker_detail_layout.addWidget(error_label)
-            return
-
-        # Populate with new data
-        title = QLabel(f"<b>{info.get('shortName', info.get('symbol'))}</b> ({info.get('symbol')})")
-        title.setStyleSheet("font-size: 16px; margin-bottom: 5px;")
-
-        def format_market_cap(mc):
-            if mc is None: return "N/A"
-            if mc > 1_000_000_000_000: return f"${mc/1_000_000_000_000:.2f}T"
-            if mc > 1_000_000_000: return f"${mc/1_000_000_000:.2f}B"
-            if mc > 1_000_000: return f"${mc/1_000_000:.2f}M"
-            return f"${mc}"
-
-        pe_ratio = f"{info.get('trailingPE'):.2f}" if info.get('trailingPE') else "N/A"
-        div_yield = f"{info.get('dividendYield')*100:.2f}%" if info.get('dividendYield') else "N/A"
-
-        metrics_text = (
-            f"<b>Market Cap:</b> {format_market_cap(info.get('marketCap'))}<br>"
-            f"<b>P/E Ratio:</b> {pe_ratio}<br>"
-            f"<b>Dividend Yield:</b> {div_yield}"
-        )
-        metrics_label = QLabel(metrics_text)
-
-        bio_title = QLabel("<b>Company Bio</b>")
-        bio_title.setStyleSheet("color: #005a9e; margin-top: 10px;")
-        bio_text = QLabel(info.get('longBusinessSummary', 'No company summary available.'))
-        bio_text.setWordWrap(True)
-
-        self.ticker_detail_layout.addWidget(title)
-        self.ticker_detail_layout.addWidget(metrics_label)
-        self.ticker_detail_layout.addWidget(bio_title)
-        self.ticker_detail_layout.addWidget(bio_text)
-        self.ticker_detail_layout.addStretch()
+        if source_index.row() < len(self.all_candidates_data):
+            candidate = self.all_candidates_data[source_index.row()]
+            asyncio.create_task(self.update_context_pane_for_ticker(candidate))
 
     def on_strategy_selected(self, strategy_id):
         """Handles a click on any sub-strategy button from any card."""
@@ -1068,8 +866,11 @@ class MainWindow(QMainWindow):
         self.results_df = pd.DataFrame()
         self.table_view.setModel(None)
 
-        # The QButtonGroup now handles unchecking other buttons automatically.
-        # No manual unchecking is needed.
+        # Uncheck buttons in all other cards
+        sender_card = self.sender()
+        for card in self.scan_cards:
+             if card is not sender_card:
+                card.uncheck_all()
 
         # Update the context pane
         self.update_context_pane_for_scan(strategy_id)
@@ -1108,6 +909,73 @@ class MainWindow(QMainWindow):
 
         self.context_stack.setCurrentIndex(0)
 
+    async def update_context_pane_for_ticker(self, candidate: ReboundCandidate):
+        # Clear the previous content
+        for i in reversed(range(self.ticker_detail_layout.count())):
+            self.ticker_detail_layout.itemAt(i).widget().setParent(None)
+
+        # Show loading message
+        loading_label = QLabel("Loading Ticker Details...")
+        self.ticker_detail_layout.addWidget(loading_label)
+        self.context_stack.setCurrentIndex(1)
+
+        # Fetch full data
+        if not hasattr(self, 'fund_handler'):
+            from fundamentals import FundamentalDataHandler
+            self.fund_handler = FundamentalDataHandler()
+
+        info = await self.fund_handler.get_full_ticker_info(candidate.ticker)
+
+        # Clear loading message
+        loading_label.setParent(None)
+
+        if not info:
+            error_label = QLabel(f"Could not load details for {candidate.ticker}.")
+            self.ticker_detail_layout.addWidget(error_label)
+            return
+
+        # Populate with new data
+        title = QLabel(f"<b>{info.get('shortName', candidate.ticker)}</b> ({candidate.ticker})")
+        title.setStyleSheet("font-size: 16px; margin-bottom: 5px;")
+
+        # TODO: Add a larger chart here later
+        chart_placeholder = QLabel("Chart will be here")
+        chart_placeholder.setMinimumHeight(150)
+        chart_placeholder.setStyleSheet("background-color: #e0e0e0; border: 1px solid #ccc;")
+        chart_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Key metrics
+        def format_market_cap(mc):
+            if mc is None: return "N/A"
+            if mc > 1_000_000_000_000: return f"${mc/1_000_000_000_000:.2f}T"
+            if mc > 1_000_000_000: return f"${mc/1_000_000_000:.2f}B"
+            if mc > 1_000_000: return f"${mc/1_000_000:.2f}M"
+            return f"${mc}"
+
+        pe_ratio = f"{info.get('trailingPE'):.2f}" if info.get('trailingPE') else "N/A"
+        div_yield = f"{info.get('dividendYield')*100:.2f}%" if info.get('dividendYield') else "N/A"
+
+        metrics_text = (
+            f"<b>Market Cap:</b> {format_market_cap(info.get('marketCap'))}<br>"
+            f"<b>P/E Ratio:</b> {pe_ratio}<br>"
+            f"<b>Dividend Yield:</b> {div_yield}"
+        )
+        metrics_label = QLabel(metrics_text)
+
+        # Company Bio
+        bio_title = QLabel("<b>Company Bio</b>")
+        bio_title.setStyleSheet("color: #005a9e; margin-top: 10px;")
+        bio_text = QLabel(info.get('longBusinessSummary', 'No company summary available.'))
+        bio_text.setWordWrap(True)
+
+        self.ticker_detail_layout.addWidget(title)
+        self.ticker_detail_layout.addWidget(chart_placeholder)
+        self.ticker_detail_layout.addWidget(metrics_label)
+        self.ticker_detail_layout.addWidget(bio_title)
+        self.ticker_detail_layout.addWidget(bio_text)
+        self.ticker_detail_layout.addStretch()
+
+
     def populate_strategy_cards(self):
         """
         Loads scenarios from the runner and populates the selection pane with
@@ -1116,12 +984,11 @@ class MainWindow(QMainWindow):
         scenarios = ScenarioRunner.load_scenarios_config()
 
         # Define icons for categories
-        # Using text instead of emojis to avoid font rendering issues in Flatpak
         icons = {
-            "Trend & Momentum": "[Trend]",
-            "Contrarian & Reversion": "[Reversion]",
-            "Value & Fundamental": "[Value]",
-            "Volatility": "[Volatility]"
+            "Trend & Momentum": "📈",
+            "Contrarian & Reversion": "📉",
+            "Value & Fundamental": "💰",
+            "Volatility": "⚡️"
         }
 
         # Group scenarios by the 'group' key
@@ -1137,12 +1004,10 @@ class MainWindow(QMainWindow):
             card = ScanCategoryCard(
                 title=group_name,
                 description=scenarios_in_group[0].get('group_description', ''), # Assuming first desc is fine
-                icon_char=icons.get(group_name, "[?]"),
+                icon_char=icons.get(group_name, "❓"),
                 sub_strategies=scenarios_in_group
             )
             card.strategySelected.connect(self.on_strategy_selected)
-            for btn in card.sub_strategy_buttons.values():
-                self.strategy_button_group.addButton(btn)
             self.card_layout.insertWidget(self.card_layout.count() - 1, card)
             self.scan_cards.append(card)
 
@@ -1168,21 +1033,33 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def open_settings_dialog(self):
-        """Opens the new, comprehensive settings dialog."""
-        dialog = SettingsDialog(self)
-        dialog.exec()
+        """
+        Opens a settings dialog.
+        For now, it just contains the 'Clear Cache' functionality.
+        """
+        reply = QMessageBox.question(self, "Confirm Cache Deletion",
+                                     f"Are you sure you want to delete all cached data from {config.CACHE_DIR}?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                     QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                shutil.rmtree(config.CACHE_DIR)
+                config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                self.status_bar.showMessage("Cache successfully cleared.", 5000)
+            except Exception as e:
+                QMessageBox.critical(self, "Cache Error", f"Failed to clear cache: {e}")
 
     def show_about_dialog(self):
         """Shows a simple 'About' dialog."""
         about_text = f"""
         <b>{config.APP_NAME} v2.0</b>
-        <p>This application scans global stock markets to identify potential investment candidates based on a variety of technical and fundamental scenarios.</p>
-        <p>Developed by Lukas Morcinek.</p>
+        <p>{self.tr("This application scans global stock markets to identify potential investment candidates based on a variety of technical and fundamental scenarios.")}</p>
+        <p>{self.tr("Developed by Lukas Morcinek.")}</p>
         <hr>
-        <p><b>Disclaimer:</b></p>
-        <p>This tool is for informational purposes only and does not constitute financial advice. Always conduct your own thorough research before making any investment decisions.</p>
+        <p><b>{self.tr("Disclaimer:")}</b></p>
+        <p>{self.tr("This tool is for informational purposes only and does not constitute financial advice. Always conduct your own thorough research before making any investment decisions.")}</p>
         """
-        QMessageBox.about(self, f"About {config.APP_NAME}", about_text)
+        QMessageBox.about(self, self.tr("About") + f" {config.APP_NAME}", about_text)
 
     def run_demo_scan(self):
         """Selects a demo scan and runs it."""
@@ -1199,14 +1076,14 @@ class MainWindow(QMainWindow):
                 self.start_scan()
                 return
 
-        QMessageBox.warning(self, "Demo Error", "Could not find the 'Golden Cross' demo scan.")
+        QMessageBox.warning(self, self.tr("Demo Error"), self.tr("Could not find the 'Golden Cross' demo scan."))
 
     def start_scan(self):
         """Sets up and starts the analysis worker thread."""
         ticker = self.single_ticker_input.text().strip().upper() or None
 
         if not self.activeScan:
-            QMessageBox.warning(self, "Selection Error", "Please select a scan strategy from the left pane.")
+            QMessageBox.warning(self, self.tr("Selection Error"), self.tr("Please select a scan strategy from the left pane."))
             return
 
         self.run_scan_button.setEnabled(False)
@@ -1242,9 +1119,9 @@ class MainWindow(QMainWindow):
     def scan_error(self, error_info):
         """Shows a toast notification when an error occurs during the scan."""
         exctype, value, tb = error_info
-        error_message = f"An unexpected error occurred:\n\n{value}\n\nTraceback:\n{tb}"
+        error_message = f"{self.tr('An unexpected error occurred:')}\n\n{value}\n\nTraceback:\n{tb}"
 
-        self.status_bar.showMessage(f"Scan Error: {value}")
+        self.status_bar.showMessage(f"{self.tr('Scan Error:')} {value}")
         self.run_scan_button.setEnabled(True)
         self.single_ticker_input.setEnabled(True)
         self.stop_scan_button.hide()
@@ -1281,13 +1158,13 @@ class MainWindow(QMainWindow):
         self.scan_progress_label.setText("") # Clear progress text
 
         # Update timestamp on successful scan
-        self.last_updated_label.setText(f"Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        self.last_updated_label.setText(f"{self.tr('Last Updated:')} {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
         # Check if the scan was cancelled, otherwise show the count
         if self.worker and self.worker._is_cancelled:
-             self.status_bar.showMessage(f"Scan stopped by user. {len(results)} candidates found before stopping.")
+             self.status_bar.showMessage(self.tr("Scan stopped by user. {n} candidates found before stopping.").format(n=len(results)))
         else:
-            self.status_bar.showMessage(f"Scan complete. Found {len(results)} candidates.")
+            self.status_bar.showMessage(self.tr("Scan complete. Found {n} candidates.").format(n=len(results)))
 
         self.run_scan_button.setEnabled(True)
         self.single_ticker_input.setEnabled(True)
@@ -1302,8 +1179,8 @@ class MainWindow(QMainWindow):
 
             # Update and switch to No Results view
             scenarios = ScenarioRunner.load_scenarios_config()
-            scenario_name = next((s['name'] for s in scenarios if s['id'] == self.activeScan), "the selected scan")
-            self.no_results_label.setText(f'No stocks matched your scan for "{scenario_name}".\nYou can try another strategy.')
+            scenario_name = next((s['name'] for s in scenarios if s['id'] == self.activeScan), self.tr("the selected scan"))
+            self.no_results_label.setText(self.tr('No stocks matched your scan for "{scenario_name}".\nYou can try another strategy.').format(scenario_name=scenario_name))
             self.stacked_widget.setCurrentIndex(2) # 2 is the no_results_widget
             return
 
@@ -1325,20 +1202,20 @@ class MainWindow(QMainWindow):
             # TODO: Fetch and add Change %
             # TODO: Add placeholder for Sparkline
             res_dict = {
-                "Ticker": r.ticker,
-                "Name": r.fundamentals.get('name', 'N/A'),
-                "Price": f"${r.technicals.get('price', 0):.2f}",
-                "Change %": "0.00%", # Placeholder
-                "Rebound Score": r.rebound_score,
-                "Tech. Score": r.technical_score,
-                "Fund. Score": r.fundamental_score,
-                "ROE": roe_str,
-                "Sparkline": "" # Placeholder for the delegate
+                self.tr("Ticker"): r.ticker,
+                self.tr("Name"): r.fundamentals.get('name', 'N/A'),
+                self.tr("Price"): f"${r.technicals.get('price', 0):.2f}",
+                self.tr("Change %"): "0.00%", # Placeholder
+                self.tr("Rebound Score"): r.rebound_score,
+                self.tr("Tech. Score"): r.technical_score,
+                self.tr("Fund. Score"): r.fundamental_score,
+                self.tr("ROE"): roe_str,
+                self.tr("Sparkline"): "" # Placeholder for the delegate
             }
             display_results_list.append(res_dict)
 
         self.results_df = pd.DataFrame(display_results_list)
-        self.results_summary_label.setText(f"Found {len(results)} results for \"{scenario_name}\" scan.")
+        self.results_summary_label.setText(self.tr("Found {n} results for \"{scenario_name}\" scan.").format(n=len(results), scenario_name=scenario_name))
         # Keep the original full candidate objects for charting and for detailed tooltips
         self.all_candidates_data = results
 
