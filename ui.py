@@ -392,27 +392,6 @@ class ChartWindow(QWidget):
                 mpf.make_addplot(macd_hist, type='bar', ax=macd_ax, color='grey', alpha=0.5)
             ]
 
-            # --- Select Chart Style ---
-            chart_style = 'yahoo'
-            if settings.get('theme') == 'dark':
-                chart_style = 'nightclouds'
-                # Also update the figure's facecolor to match the dark theme
-                self.figure.patch.set_facecolor('#2b2b2b')
-                # Update text colors for dark mode
-                price_ax.tick_params(axis='y', colors='white')
-                volume_ax.tick_params(axis='y', colors='white')
-                rsi_ax.tick_params(axis='y', colors='white')
-                macd_ax.tick_params(axis='y', colors='white')
-                macd_ax.tick_params(axis='x', colors='white')
-                price_ax.yaxis.label.set_color('white')
-                volume_ax.yaxis.label.set_color('white')
-                rsi_ax.yaxis.label.set_color('white')
-                macd_ax.yaxis.label.set_color('white')
-                self.figure.suptitle(f'{candidate.ticker} - {candidate.scenario}', y=0.98, color='white')
-            else:
-                self.figure.suptitle(f'{candidate.ticker} - {candidate.scenario}', y=0.98, color='black')
-
-
             # The main plot call uses the main axes and adds the others.
             mpf.plot(plot_data,
                      type='candle',
@@ -420,9 +399,12 @@ class ChartWindow(QWidget):
                      volume=volume_ax,
                      mav=(50, 200),
                      addplot=add_plots,
-                     style=chart_style,
+                     style='yahoo',
                      xrotation=20,
                      hlines=hlines_fib if hlines_fib else None)
+
+            # --- Final Styling ---
+            self.figure.suptitle(f'{candidate.ticker} - {candidate.scenario}', y=0.98)
 
             # --- Add Fibonacci Labels ---
             if fib_levels:
@@ -473,15 +455,8 @@ class ChartWindow(QWidget):
             info_parts = [f"Scenario: {candidate.scenario}", price_str, rsi_str, eps_growth_str, rev_growth_str]
             info_text = " | ".join(filter(None, info_parts))
 
-            # Adjust info text color and background based on theme
-            info_text_color = '#333333'
-            info_bbox_color = 'yellow'
-            if settings.get('theme') == 'dark':
-                info_text_color = '#dcdcdc'
-                info_bbox_color = '#4a4a4a'
-
             self.figure.text(0.5, 0.94, info_text, ha='center', va='center', fontsize=8,
-                             color=info_text_color, bbox=dict(boxstyle='round,pad=0.4', fc=info_bbox_color, alpha=0.8, ec='none'))
+                             color='#333333', bbox=dict(boxstyle='round,pad=0.4', fc='yellow', alpha=0.5, ec='none'))
 
             self.figure.subplots_adjust(top=0.90, bottom=0.08, left=0.08, right=0.95, hspace=0.15)
             self.canvas.draw()
@@ -654,10 +629,27 @@ class SettingsDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        # --- Theme Settings ---
-        self.theme_checkbox = QCheckBox("Enable Dark Mode")
-        self.theme_checkbox.setChecked(settings.get("theme") == "dark")
-        layout.addWidget(self.theme_checkbox)
+        # --- Language Settings ---
+        lang_layout = QHBoxLayout()
+        lang_label = QLabel("UI Language:")
+        self.lang_combo = QComboBox()
+
+        # Add items with user-facing text and internal language codes
+        self.lang_combo.addItem("English", "en")
+        self.lang_combo.addItem("German (Deutsch)", "de")
+        self.lang_combo.addItem("Spanish (Español)", "es")
+
+        lang_layout.addWidget(lang_label)
+        lang_layout.addWidget(self.lang_combo)
+        layout.addLayout(lang_layout)
+
+        # Set the current selection based on saved settings
+        current_lang = settings.get("language", "en")
+        index = self.lang_combo.findData(current_lang)
+        if index != -1:
+            self.lang_combo.setCurrentIndex(index)
+
+        layout.addSpacing(20)
 
         # --- Cache Settings ---
         clear_cache_button = QPushButton("Clear Scanner Cache")
@@ -674,9 +666,14 @@ class SettingsDialog(QDialog):
 
     def accept(self):
         """Saves the settings when the OK button is clicked."""
-        new_theme = "dark" if self.theme_checkbox.isChecked() else "light"
-        settings.set("theme", new_theme)
-        # Add other settings saving here
+        # Save the selected language
+        selected_lang_code = self.lang_combo.currentData()
+        settings.set("language", selected_lang_code)
+
+        # Inform the user that a restart is needed for the language change
+        QMessageBox.information(self, "Restart Required",
+                                "The language change will take effect the next time you start the application.")
+
         super().accept()
 
     def clear_cache(self):
@@ -702,7 +699,6 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(config.APP_NAME)
         self.setGeometry(100, 100, 1200, 800)
-        self.apply_theme() # Apply theme at startup
 
         # Set window icon
         icon = QIcon.fromTheme("com.rectifex.GlobalReboundScreener")
@@ -1248,23 +1244,7 @@ class MainWindow(QMainWindow):
     def open_settings_dialog(self):
         """Opens the new, comprehensive settings dialog."""
         dialog = SettingsDialog(self)
-        if dialog.exec():
-            # If user clicked OK, apply changes that require a refresh
-            self.apply_theme()
-            self.status_bar.showMessage("Settings updated.", 3000)
-
-    def apply_theme(self):
-        """Loads and applies the current theme from settings."""
-        theme = settings.get("theme", "light")
-        stylesheet_path = Path(f"styles/{theme}.qss")
-        try:
-            if stylesheet_path.exists():
-                with open(stylesheet_path, "r") as f:
-                    self.setStyleSheet(f.read())
-            else:
-                logging.warning(f"Stylesheet not found: {stylesheet_path}")
-        except Exception as e:
-            logging.error(f"Failed to apply theme '{theme}': {e}")
+        dialog.exec()
 
     def show_about_dialog(self):
         """Shows a simple 'About' dialog."""

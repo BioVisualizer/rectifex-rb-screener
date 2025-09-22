@@ -11,7 +11,7 @@ USER_CONFIG_FILE = config.APP_DATA_DIR / "user_config.json"
 # These are the settings that the app will fall back to if they are
 # not present in the user_config.json file.
 DEFAULT_SETTINGS = {
-    "theme": "light",
+    "language": "en",
     "min_market_cap": 2_000_000_000, # Default to 2 Billion
     "min_avg_volume_30d": 500_000,    # Default to 500,000
     # Add other future user-configurable settings here
