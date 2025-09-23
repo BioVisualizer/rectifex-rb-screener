@@ -75,6 +75,31 @@ class AnalysisWorker(QObject):
             self.signals.finished.emit()
 
 
+class TickerDetailWorker(QObject):
+    """Worker thread for fetching detailed ticker information."""
+    finished = pyqtSignal()
+    result = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def __init__(self, ticker: str):
+        super().__init__()
+        self.ticker = ticker
+
+    def run(self):
+        """Fetches the data and emits the result."""
+        try:
+            from fundamentals import FundamentalDataHandler
+            fund_handler = FundamentalDataHandler()
+            info = asyncio.run(fund_handler.get_full_ticker_info(self.ticker))
+            if info: # Ensure info is not None before emitting
+                self.result.emit(info)
+        except Exception as e:
+            logging.error(f"Failed to fetch ticker details for {self.ticker}: {e}", exc_info=True)
+            self.error.emit(str(e))
+        finally:
+            self.finished.emit()
+
+
 # --- Pandas DataFrame Model for QTableView ---
 
 class PandasModel(QAbstractTableModel):
@@ -853,10 +878,95 @@ class MainWindow(QMainWindow):
         """Handles a click on a ticker in the results table."""
         if not index.isValid():
             return
+
         source_index = self.table_view.model().mapToSource(index)
         if source_index.row() < len(self.all_candidates_data):
             candidate = self.all_candidates_data[source_index.row()]
-            asyncio.create_task(self.update_context_pane_for_ticker(candidate))
+            self.selected_ticker_for_detail = candidate.ticker # Store for error messages
+
+            # Clear previous content and show loading message immediately
+            for i in reversed(range(self.ticker_detail_layout.count())):
+                self.ticker_detail_layout.itemAt(i).widget().setParent(None)
+            loading_label = QLabel("Loading Ticker Details...")
+            self.ticker_detail_layout.addWidget(loading_label)
+            self.context_stack.setCurrentIndex(1)
+
+            # Create and run worker
+            self.detail_thread = QThread()
+            self.detail_worker = TickerDetailWorker(candidate.ticker)
+            self.detail_worker.moveToThread(self.detail_thread)
+
+            self.detail_thread.started.connect(self.detail_worker.run)
+            self.detail_worker.finished.connect(self.detail_thread.quit)
+            self.detail_worker.finished.connect(self.detail_worker.deleteLater)
+            self.detail_thread.finished.connect(self.detail_thread.deleteLater)
+
+            # Connect result signal to a new method that updates the GUI
+            self.detail_worker.result.connect(self.update_context_pane_with_data)
+            self.detail_worker.error.connect(self.on_detail_fetch_error)
+
+            self.detail_thread.start()
+
+    def on_detail_fetch_error(self, error_message):
+        """Handles errors from the TickerDetailWorker."""
+        # Clear the loading message
+        for i in reversed(range(self.ticker_detail_layout.count())):
+            self.ticker_detail_layout.itemAt(i).widget().setParent(None)
+
+        error_label = QLabel(f"Error fetching details for {self.selected_ticker_for_detail}:\n{error_message}")
+        error_label.setWordWrap(True)
+        self.ticker_detail_layout.addWidget(error_label)
+
+    def update_context_pane_with_data(self, info: dict):
+        """Updates the context pane with fetched ticker data."""
+        # Clear loading message
+        for i in reversed(range(self.ticker_detail_layout.count())):
+            self.ticker_detail_layout.itemAt(i).widget().setParent(None)
+
+        if not info:
+            error_label = QLabel(f"Could not load details for {self.selected_ticker_for_detail}.")
+            self.ticker_detail_layout.addWidget(error_label)
+            return
+
+        ticker = info.get('symbol', self.selected_ticker_for_detail)
+
+        # Populate with new data
+        title = QLabel(f"<b>{info.get('shortName', ticker)}</b> ({ticker})")
+        title.setStyleSheet("font-size: 16px; margin-bottom: 5px;")
+
+        chart_placeholder = QLabel("Chart will be here")
+        chart_placeholder.setMinimumHeight(150)
+        chart_placeholder.setStyleSheet("background-color: #e0e0e0; border: 1px solid #ccc;")
+        chart_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        def format_market_cap(mc):
+            if mc is None: return "N/A"
+            if mc > 1_000_000_000_000: return f"${mc/1_000_000_000_000:.2f}T"
+            if mc > 1_000_000_000: return f"${mc/1_000_000_000:.2f}B"
+            if mc > 1_000_000: return f"${mc/1_000_000:.2f}M"
+            return f"${mc}"
+
+        pe_ratio = f"{info.get('trailingPE'):.2f}" if info.get('trailingPE') else "N/A"
+        div_yield = f"{info.get('dividendYield')*100:.2f}%" if info.get('dividendYield') else "N/A"
+
+        metrics_text = (
+            f"<b>Market Cap:</b> {format_market_cap(info.get('marketCap'))}<br>"
+            f"<b>P/E Ratio:</b> {pe_ratio}<br>"
+            f"<b>Dividend Yield:</b> {div_yield}"
+        )
+        metrics_label = QLabel(metrics_text)
+
+        bio_title = QLabel("<b>Company Bio</b>")
+        bio_title.setStyleSheet("color: #005a9e; margin-top: 10px;")
+        bio_text = QLabel(info.get('longBusinessSummary', 'No company summary available.'))
+        bio_text.setWordWrap(True)
+
+        self.ticker_detail_layout.addWidget(title)
+        self.ticker_detail_layout.addWidget(chart_placeholder)
+        self.ticker_detail_layout.addWidget(metrics_label)
+        self.ticker_detail_layout.addWidget(bio_title)
+        self.ticker_detail_layout.addWidget(bio_text)
+        self.ticker_detail_layout.addStretch()
 
     def on_strategy_selected(self, strategy_id):
         """Handles a click on any sub-strategy button from any card."""
@@ -909,72 +1019,6 @@ class MainWindow(QMainWindow):
             self.scan_explanation_layout.addStretch()
 
         self.context_stack.setCurrentIndex(0)
-
-    async def update_context_pane_for_ticker(self, candidate: ReboundCandidate):
-        # Clear the previous content
-        for i in reversed(range(self.ticker_detail_layout.count())):
-            self.ticker_detail_layout.itemAt(i).widget().setParent(None)
-
-        # Show loading message
-        loading_label = QLabel("Loading Ticker Details...")
-        self.ticker_detail_layout.addWidget(loading_label)
-        self.context_stack.setCurrentIndex(1)
-
-        # Fetch full data
-        if not hasattr(self, 'fund_handler'):
-            from fundamentals import FundamentalDataHandler
-            self.fund_handler = FundamentalDataHandler()
-
-        info = await self.fund_handler.get_full_ticker_info(candidate.ticker)
-
-        # Clear loading message
-        loading_label.setParent(None)
-
-        if not info:
-            error_label = QLabel(f"Could not load details for {candidate.ticker}.")
-            self.ticker_detail_layout.addWidget(error_label)
-            return
-
-        # Populate with new data
-        title = QLabel(f"<b>{info.get('shortName', candidate.ticker)}</b> ({candidate.ticker})")
-        title.setStyleSheet("font-size: 16px; margin-bottom: 5px;")
-
-        # TODO: Add a larger chart here later
-        chart_placeholder = QLabel("Chart will be here")
-        chart_placeholder.setMinimumHeight(150)
-        chart_placeholder.setStyleSheet("background-color: #e0e0e0; border: 1px solid #ccc;")
-        chart_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        # Key metrics
-        def format_market_cap(mc):
-            if mc is None: return "N/A"
-            if mc > 1_000_000_000_000: return f"${mc/1_000_000_000_000:.2f}T"
-            if mc > 1_000_000_000: return f"${mc/1_000_000_000:.2f}B"
-            if mc > 1_000_000: return f"${mc/1_000_000:.2f}M"
-            return f"${mc}"
-
-        pe_ratio = f"{info.get('trailingPE'):.2f}" if info.get('trailingPE') else "N/A"
-        div_yield = f"{info.get('dividendYield')*100:.2f}%" if info.get('dividendYield') else "N/A"
-
-        metrics_text = (
-            f"<b>Market Cap:</b> {format_market_cap(info.get('marketCap'))}<br>"
-            f"<b>P/E Ratio:</b> {pe_ratio}<br>"
-            f"<b>Dividend Yield:</b> {div_yield}"
-        )
-        metrics_label = QLabel(metrics_text)
-
-        # Company Bio
-        bio_title = QLabel("<b>Company Bio</b>")
-        bio_title.setStyleSheet("color: #005a9e; margin-top: 10px;")
-        bio_text = QLabel(info.get('longBusinessSummary', 'No company summary available.'))
-        bio_text.setWordWrap(True)
-
-        self.ticker_detail_layout.addWidget(title)
-        self.ticker_detail_layout.addWidget(chart_placeholder)
-        self.ticker_detail_layout.addWidget(metrics_label)
-        self.ticker_detail_layout.addWidget(bio_title)
-        self.ticker_detail_layout.addWidget(bio_text)
-        self.ticker_detail_layout.addStretch()
 
 
     def populate_strategy_cards(self):
