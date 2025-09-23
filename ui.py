@@ -408,11 +408,9 @@ class MainWindow(QMainWindow):
     def on_strategy_selected(self, strategy_id):
         self.activeScan = strategy_id; self.stacked_widget.setCurrentIndex(0)
         self.results_df = pd.DataFrame(); self.table_view.setModel(None)
-        sender_button = self.sender()
-        if sender_button:
-            parent_card = sender_button.parent()
-            for card in self.scan_cards:
-                if card is not parent_card: card.uncheck_all()
+        # The QButtonGroup handles unchecking other buttons automatically.
+        # The removed code here was redundant and causing a crash because
+        # the 'uncheck_all' method does not exist.
         self.update_context_pane_for_scan(strategy_id)
     def update_context_pane_for_scan(self, strategy_id):
         while self.scan_explanation_layout.count():
