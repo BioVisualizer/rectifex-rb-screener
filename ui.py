@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 from datetime import datetime
 from pathlib import Path
 from io import BytesIO
+from typing import Optional
 from PyQt6.QtCore import (
     QObject, QThread, pyqtSignal, QAbstractTableModel, Qt, QSortFilterProxyModel, QRegularExpression, QTimer
 )
