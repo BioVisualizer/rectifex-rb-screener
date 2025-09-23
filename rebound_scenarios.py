@@ -115,6 +115,15 @@ class BaseScenario(ABC):
         if self.progress_percent_callback:
             if hasattr(self.progress_percent_callback, 'emit'): self.progress_percent_callback.emit(percent)
             else: self.progress_percent_callback(percent)
+
+    def _get_fundamentals_for_candidate(self, fundamental_data: Dict, stock_info: Dict) -> Dict:
+        """Helper to combine fundamental metrics with the company name."""
+        # Start with the metrics dict, or an empty one if not present
+        fund_dict = fundamental_data.get('metrics', {}) if fundamental_data else {}
+        # Add the short name from the separate stock_info call
+        fund_dict['name'] = stock_info.get('shortName', 'N/A')
+        return fund_dict
+
     @abstractmethod
     def run(self, stock_data: pd.DataFrame, fundamental_data: Dict, stock_info: Dict) -> Optional[ReboundCandidate]:
         """The main execution method for the scenario."""
@@ -159,7 +168,7 @@ class ClassicOversoldScenario(BaseScenario):
         technical_score, rsi_score, prox_score = self._calculate_score(rsi, dist_sma, dist_low)
         technicals_dict = {'price': round(stock_data['Close'].iloc[-1], 2) if pd.notna(stock_data['Close'].iloc[-1]) else 'N/A', 'rsi': round(rsi, 2) if pd.notna(rsi) else 'N/A', 'dist_sma_200': round(dist_sma, 2) if pd.notna(dist_sma) else 'N/A', 'dist_low_90d': round(dist_low, 2) if pd.notna(dist_low) else 'N/A'}
         score_breakdown_dict = {'rsi_score': rsi_score, 'prox_score': prox_score}
-        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, rebound_score=0, technical_score=technical_score, fundamentals=fundamental_data, history_df=stock_data, technicals=technicals_dict, score_breakdown=score_breakdown_dict)
+        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, rebound_score=0, technical_score=technical_score, fundamentals=self._get_fundamentals_for_candidate(fundamental_data, stock_info), history_df=stock_data, technicals=technicals_dict, score_breakdown=score_breakdown_dict)
 
 class MeanReversionScenario(BaseScenario):
     """Identifies stocks trading at or below their lower Bollinger Band."""
@@ -185,7 +194,7 @@ class MeanReversionScenario(BaseScenario):
         self._emit_progress(f"!!! {stock_info['ticker']} is a potential '{self.name}' candidate.")
         technical_score = self._calculate_score(percent_below_band)
         technicals_dict = {'price': round(current_price, 2), 'lower_band': round(lower_band, 2), 'percent_below_band': round(percent_below_band, 2)}
-        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, rebound_score=0, technical_score=technical_score, fundamentals=fundamental_data, history_df=stock_data, technicals=technicals_dict, score_breakdown={'reversion_score': technical_score})
+        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, rebound_score=0, technical_score=technical_score, fundamentals=self._get_fundamentals_for_candidate(fundamental_data, stock_info), history_df=stock_data, technicals=technicals_dict, score_breakdown={'reversion_score': technical_score})
 
 class VolatilitySqueezeScenario(BaseScenario):
     """Identifies stocks in a 'volatility squeeze'."""
@@ -213,7 +222,7 @@ class VolatilitySqueezeScenario(BaseScenario):
         self._emit_progress(f"!!! {stock_info['ticker']} is a potential '{self.name}' candidate.")
         technical_score = self._calculate_score(current_width, min_width)
         technicals_dict = {'price': round(latest['Close'], 2), 'bb_width': round(current_width, 4), 'bb_width_min': round(min_width, 4)}
-        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, rebound_score=0, technical_score=technical_score, fundamentals=fundamental_data, history_df=stock_data, technicals=technicals_dict, score_breakdown={'squeeze_score': technical_score})
+        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, rebound_score=0, technical_score=technical_score, fundamentals=self._get_fundamentals_for_candidate(fundamental_data, stock_info), history_df=stock_data, technicals=technicals_dict, score_breakdown={'squeeze_score': technical_score})
 
 class MomentumBreakoutScenario(BaseScenario):
     """Identifies stocks hitting new 52-week highs on high volume."""
@@ -245,7 +254,7 @@ class MomentumBreakoutScenario(BaseScenario):
         breakout_pct = ((current_price - high_52w) / high_52w) * 100
         technical_score, score_breakdown = self._calculate_score(volume_ratio, breakout_pct)
         technicals_dict = {'price': round(current_price, 2), '52w_high': round(high_52w, 2), 'volume_ratio': round(volume_ratio, 2), 'breakout_pct': round(breakout_pct, 2)}
-        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, rebound_score=0, technical_score=technical_score, history_df=stock_data, fundamentals=fundamental_data, technicals=technicals_dict, score_breakdown=score_breakdown)
+        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, rebound_score=0, technical_score=technical_score, history_df=stock_data, fundamentals=self._get_fundamentals_for_candidate(fundamental_data, stock_info), technicals=technicals_dict, score_breakdown=score_breakdown)
 
 class GoldenCrossScenario(BaseScenario):
     """Identifies stocks that have recently experienced a 'Golden Cross'."""
@@ -276,7 +285,7 @@ class GoldenCrossScenario(BaseScenario):
         self._emit_progress(f"!!! {stock_info['ticker']} is a potential '{self.name}' candidate.")
         technical_score = self._calculate_score(days_ago); latest = stock_data.iloc[-1]
         technicals_dict = {'price': round(latest['Close'], 2) if pd.notna(latest['Close']) else 'N/A', 'cross_days_ago': days_ago, 'sma_50': round(latest['SMA50'], 2) if pd.notna(latest['SMA50']) else 'N/A', 'sma_200': round(latest['SMA200'], 2) if pd.notna(latest['SMA200']) else 'N/A'}
-        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, rebound_score=0, technical_score=technical_score, history_df=stock_data, fundamentals=fundamental_data, technicals=technicals_dict, score_breakdown={'recency_sub_score': technical_score})
+        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, rebound_score=0, technical_score=technical_score, history_df=stock_data, fundamentals=self._get_fundamentals_for_candidate(fundamental_data, stock_info), technicals=technicals_dict, score_breakdown={'recency_sub_score': technical_score})
 
 class HighQualityDividendScenario(BaseScenario):
     """Finds stocks with high, sustainable dividends and healthy financials."""
@@ -297,7 +306,7 @@ class HighQualityDividendScenario(BaseScenario):
         self._emit_progress(f"!!! {stock_info['ticker']} is a potential '{self.name}' candidate.")
         technical_score, score_breakdown = self._calculate_score(div_yield, debt)
         technicals_dict = {'price': round(stock_data['Close'].iloc[-1], 2) if not stock_data.empty else 'N/A'}
-        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, rebound_score=0, technical_score=technical_score, history_df=stock_data, fundamentals=fundamental_data, technicals=technicals_dict, score_breakdown=score_breakdown)
+        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, rebound_score=0, technical_score=technical_score, history_df=stock_data, fundamentals=self._get_fundamentals_for_candidate(fundamental_data, stock_info), technicals=technicals_dict, score_breakdown=score_breakdown)
 
 class FundamentalDivergenceScenario(BaseScenario):
     """Identifies fundamentally strong stocks whose price has been stagnating."""
@@ -338,7 +347,7 @@ class FundamentalDivergenceScenario(BaseScenario):
         if technical_score < 50: return None
         self._emit_progress(f"!!! {stock_info['ticker']} is a potential '{self.name}' candidate.")
         technicals_dict = {'price': round(latest['Close'], 2), 'price_range_120d_pct': round(price_range_120d * 100, 2) if price_range_120d != 999 else 'N/A', 'sma50_vs_sma200_pct': round(sma_diff_pct * 100, 2)}
-        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, rebound_score=0, technical_score=technical_score, history_df=stock_data, fundamentals=fundamental_data, technicals=technicals_dict, score_breakdown=score_breakdown)
+        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, rebound_score=0, technical_score=technical_score, history_df=stock_data, fundamentals=self._get_fundamentals_for_candidate(fundamental_data, stock_info), technicals=technicals_dict, score_breakdown=score_breakdown)
 
 class QualityPullbackScenario(BaseScenario):
     """Implements the 'Quality Stock Pullback' scenario logic."""
@@ -360,7 +369,7 @@ class QualityPullbackScenario(BaseScenario):
         prox_score = 100 - (dist_to_sma50 / 3.0 * 100)
         technical_score = int(max(0, min(100, prox_score)))
         technicals_dict = {'price': round(current_price, 2), 'rsi': round(latest['RSI'], 2) if pd.notna(latest['RSI']) else 'N/A', 'dist_sma_50': round(dist_to_sma50, 2)}
-        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, rebound_score=0, technical_score=technical_score, history_df=stock_data, fundamentals=fundamental_data, technicals=technicals_dict, score_breakdown={'proximity_sub_score': technical_score})
+        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, rebound_score=0, technical_score=technical_score, history_df=stock_data, fundamentals=self._get_fundamentals_for_candidate(fundamental_data, stock_info), technicals=technicals_dict, score_breakdown={'proximity_sub_score': technical_score})
 
 class ScenarioRunner:
     """Orchestrates the screening process."""
@@ -427,11 +436,13 @@ class ScenarioRunner:
                     candidate = scenario_instance.run(stock_data, fundamental_data, stock_info)
                     if candidate:
                         tech_score = candidate.technical_score; fund_score = 0
-                        if fundamental_data:
+                        # The candidate.fundamentals dict is now pre-populated by the run() method
+                        if candidate.fundamentals:
                             if scenario_id == 'high_quality_dividend': weights = DIVIDEND_SCENARIO_FUNDAMENTAL_WEIGHTS
                             elif scenario_id == 'fundamental_divergence': weights = DIVERGENCE_SCENARIO_FUNDAMENTAL_WEIGHTS
                             else: weights = DEFAULT_FUNDAMENTAL_WEIGHTS
-                            fund_score, fund_breakdown = compute_fundamental_score(fundamentals=fundamental_data['metrics'], sector=fundamental_data.get('sector', 'N/A'), sector_stats=sector_stats, weights=weights)
+                            # We pass candidate.fundamentals here, which is the combined dict
+                            fund_score, fund_breakdown = compute_fundamental_score(fundamentals=candidate.fundamentals, sector=fundamental_data.get('sector', 'N/A'), sector_stats=sector_stats, weights=weights)
                             candidate.fundamental_score = fund_score
                             candidate.score_breakdown.update(fund_breakdown)
                         market_score = compute_market_context_score(index_data)
