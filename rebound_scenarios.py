@@ -251,6 +251,7 @@ class ClassicOversoldScenario(BaseScenario):
             scenario=self.name,
             rebound_score=0, # To be calculated by the runner
             technical_score=technical_score,
+            fundamentals=fundamental_data,
             history_df=stock_data,
             technicals=technicals_dict,
             score_breakdown=score_breakdown_dict,
@@ -314,6 +315,7 @@ class MeanReversionScenario(BaseScenario):
             scenario=self.name,
             rebound_score=0,
             technical_score=technical_score,
+            fundamentals=fundamental_data,
             history_df=stock_data,
             technicals=technicals_dict,
             score_breakdown={'reversion_score': technical_score},
@@ -383,6 +385,7 @@ class VolatilitySqueezeScenario(BaseScenario):
             scenario=self.name,
             rebound_score=0,
             technical_score=technical_score,
+            fundamentals=fundamental_data,
             history_df=stock_data,
             technicals=technicals_dict,
             score_breakdown={'squeeze_score': technical_score},
@@ -444,6 +447,7 @@ class MomentumBreakoutScenario(BaseScenario):
         return ReboundCandidate(
             ticker=stock_info['ticker'], scenario=self.name, rebound_score=0,
             technical_score=technical_score, history_df=stock_data,
+            fundamentals=fundamental_data,
             technicals=technicals_dict, score_breakdown=score_breakdown
         )
 
@@ -506,6 +510,7 @@ class GoldenCrossScenario(BaseScenario):
         return ReboundCandidate(
             ticker=stock_info['ticker'], scenario=self.name, rebound_score=0,
             technical_score=technical_score, history_df=stock_data,
+            fundamentals=fundamental_data,
             technicals=technicals_dict, score_breakdown={'recency_sub_score': technical_score}
         )
 
@@ -553,6 +558,7 @@ class HighQualityDividendScenario(BaseScenario):
         return ReboundCandidate(
             ticker=stock_info['ticker'], scenario=self.name, rebound_score=0,
             technical_score=technical_score, history_df=stock_data,
+            fundamentals=fundamental_data,
             technicals=technicals_dict, score_breakdown=score_breakdown
         )
 
@@ -632,6 +638,7 @@ class FundamentalDivergenceScenario(BaseScenario):
         return ReboundCandidate(
             ticker=stock_info['ticker'], scenario=self.name, rebound_score=0,
             technical_score=technical_score, history_df=stock_data,
+            fundamentals=fundamental_data,
             technicals=technicals_dict, score_breakdown=score_breakdown
         )
 
@@ -685,6 +692,7 @@ class QualityPullbackScenario(BaseScenario):
         return ReboundCandidate(
             ticker=stock_info['ticker'], scenario=self.name, rebound_score=0,
             technical_score=technical_score, history_df=stock_data,
+            fundamentals=fundamental_data,
             technicals=technicals_dict, score_breakdown={'proximity_sub_score': technical_score}
         )
 
