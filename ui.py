@@ -5,7 +5,7 @@ import sys
 import logging
 import pandas as pd
 import shutil
-import datetime
+from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableView, QStatusBar, QFileDialog, QMessageBox, QHeaderView,
