@@ -136,6 +136,20 @@ This application is intended for informational and educational purposes only. Th
 
 The screening results are based on technical indicators and historical data, which are not guarantees of future performance. You should always conduct your own thorough research and consult with a qualified financial advisor before making any investment decisions. The author and contributors are not responsible for any investment losses you may incur.
 
+## Glossary of Terms
+
+Here are explanations for the key terms used in the results table:
+
+*   **Ticker**: The unique symbol representing a publicly traded stock on a particular stock exchange (e.g., `AAPL` for Apple Inc.).
+*   **Name**: The common name of the company.
+*   **Price**: The most recent closing price of the stock at the time the data was last fetched.
+*   **Change %**: The percentage change in the stock's price over the most recent trading day. *(Note: This is currently a placeholder and not yet implemented).*
+*   **Rebound Score**: A proprietary, composite score (0-100) that combines the Technical, Fundamental, and Market Context scores. It gives a high-level indication of the overall strength of the rebound setup. A higher score is better.
+*   **Tech. Score**: A score (0-100) based purely on technical indicators derived from the stock's price and volume history. The specific indicators used depend on the selected scanning scenario.
+*   **Fund. Score**: A score (0-100) based on the company's financial health, comparing its metrics (like growth, profitability, and debt) against its peers in the same sector.
+*   **ROE (Return on Equity)**: A measure of a company's financial performance calculated by dividing net income by shareholders' equity. It is often considered a gauge of a corporation's profitability and how efficiently it generates profits. A higher ROE is generally considered better.
+*   **Sparkline**: A small, simple line chart designed to show the general trend of a stock's price over the last 30 trading days. It provides a quick visual reference for recent price action.
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
