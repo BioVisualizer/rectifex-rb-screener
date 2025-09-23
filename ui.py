@@ -130,8 +130,7 @@ class PandasModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.EditRole:
             return self._data.iloc[row, col]
         if role == Qt.ItemDataRole.TextAlignmentRole:
-            if column_name in self.numeric_columns:
-                return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         if role == Qt.ItemDataRole.BackgroundRole:
             if "Rebound Score" in self._data.columns:
                 score = self._data.iloc[row]["Rebound Score"]
