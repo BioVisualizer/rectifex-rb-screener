@@ -854,6 +854,19 @@ class MainWindow(QMainWindow):
         self.filter_results_input.textChanged.connect(self.filter_table)
         self.single_ticker_input.textChanged.connect(self.validate_single_ticker_input)
 
+    def clear_layout(self, layout):
+        """Safely clears all items from a layout."""
+        if layout is not None:
+            while layout.count():
+                item = layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    widget.deleteLater()
+                else:
+                    sub_layout = item.layout()
+                    if sub_layout is not None:
+                        self.clear_layout(sub_layout)
+
     def validate_single_ticker_input(self, text: str):
         """
         Validates the single ticker input field.
@@ -885,8 +898,7 @@ class MainWindow(QMainWindow):
             self.selected_ticker_for_detail = candidate.ticker # Store for error messages
 
             # Clear previous content and show loading message immediately
-            for i in reversed(range(self.ticker_detail_layout.count())):
-                self.ticker_detail_layout.itemAt(i).widget().setParent(None)
+            self.clear_layout(self.ticker_detail_layout)
             loading_label = QLabel("Loading Ticker Details...")
             self.ticker_detail_layout.addWidget(loading_label)
             self.context_stack.setCurrentIndex(1)
@@ -910,8 +922,7 @@ class MainWindow(QMainWindow):
     def on_detail_fetch_error(self, error_message):
         """Handles errors from the TickerDetailWorker."""
         # Clear the loading message
-        for i in reversed(range(self.ticker_detail_layout.count())):
-            self.ticker_detail_layout.itemAt(i).widget().setParent(None)
+        self.clear_layout(self.ticker_detail_layout)
 
         error_label = QLabel(f"Error fetching details for {self.selected_ticker_for_detail}:\n{error_message}")
         error_label.setWordWrap(True)
@@ -920,8 +931,7 @@ class MainWindow(QMainWindow):
     def update_context_pane_with_data(self, info: dict):
         """Updates the context pane with fetched ticker data."""
         # Clear loading message
-        for i in reversed(range(self.ticker_detail_layout.count())):
-            self.ticker_detail_layout.itemAt(i).widget().setParent(None)
+        self.clear_layout(self.ticker_detail_layout)
 
         if not info:
             error_label = QLabel(f"Could not load details for {self.selected_ticker_for_detail}.")
