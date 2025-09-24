@@ -136,19 +136,49 @@ This application is intended for informational and educational purposes only. Th
 
 The screening results are based on technical indicators and historical data, which are not guarantees of future performance. You should always conduct your own thorough research and consult with a qualified financial advisor before making any investment decisions. The author and contributors are not responsible for any investment losses you may incur.
 
-## Glossary of Terms
+## Explanation of Scan Results (Scores and Metrics)
 
-Here are explanations for the key terms used in the results table:
+The results table contains several columns with technical terms and scores. Here is a detailed explanation of what they mean and how they are calculated.
 
-*   **Ticker**: The unique symbol representing a publicly traded stock on a particular stock exchange (e.g., `AAPL` for Apple Inc.).
-*   **Name**: The common name of the company.
-*   **Price**: The most recent closing price of the stock at the time the data was last fetched.
-*   **Change %**: The percentage change in the stock's price over the most recent trading day. *(Note: This is currently a placeholder and not yet implemented).*
-*   **Rebound Score**: A proprietary, composite score (0-100) that combines the Technical, Fundamental, and Market Context scores. It gives a high-level indication of the overall strength of the rebound setup. A higher score is better.
-*   **Tech. Score**: A score (0-100) based purely on technical indicators derived from the stock's price and volume history. The specific indicators used depend on the selected scanning scenario.
-*   **Fund. Score**: A score (0-100) based on the company's financial health, comparing its metrics (like growth, profitability, and debt) against its peers in the same sector.
-*   **ROE (Return on Equity)**: A measure of a company's financial performance calculated by dividing net income by shareholders' equity. It is often considered a gauge of a corporation's profitability and how efficiently it generates profits. A higher ROE is generally considered better.
-*   **Sparkline**: A small, simple line chart designed to show the general trend of a stock's price over the last 30 trading days. It provides a quick visual reference for recent price action.
+### Core Information
+*   **Ticker**: The unique symbol for a stock on its exchange (e.g., `AAPL` for Apple).
+*   **Name**: The company's name.
+*   **Price**: The most recent closing price.
+*   **Change %**: The percentage price change over the last trading day. *(Note: This is currently a placeholder value).*
+*   **Sparkline**: A mini-chart showing the price trend over the last 30 days.
+
+### The Scoring System
+
+The application uses a multi-layered scoring system to rank candidates. The final **Rebound Score** is a composite of three sub-scores: Technical, Fundamental, and Market Context.
+
+*   **Rebound Score (0-100)**: This is the final, weighted average score that indicates the overall quality of a setup. A higher score is better. It is calculated with the following default weights:
+    *   `Technical Score: 55%`
+    *   `Fundamental Score: 30%`
+    *   `Market Context Score: 15%`
+
+*   **Tech. Score (0-100)**: This score evaluates the strength of the technical chart pattern. **Its calculation is entirely dependent on the selected scan scenario.** For example:
+    *   In a **Classic Oversold** scan, it's a blend of how "oversold" the RSI is and how close the price is to a major support level (200-day average or 90-day low).
+    *   In a **Momentum Breakout** scan, it's based on the volume surge and the strength of the price breakout above the 52-week high.
+    *   Each scenario has its own unique logic for this score.
+
+*   **Fund. Score (0-100)**: This score measures a company's financial health. A company's key metrics are compared to the median values of other companies in the same sector. A score of 50 means the company is average for its sector; a score above 50 is above average. The score is calculated from the metrics listed below.
+
+*   **Market Score (0-100)**: This score assesses the health of the broader market (e.g., the S&P 500 for US stocks). It is a simple gauge:
+    *   **100 (Bullish)**: The index is trading above its 50-day moving average.
+    *   **20 (Bearish)**: The index is trading below its 50-day moving average.
+    *   **50 (Neutral)**: The market data could not be retrieved.
+
+### Key Fundamental Metrics
+
+These are some of the key financial ratios used to calculate the **Fund. Score**. The screener automatically judges whether a higher or lower value is better (e.g., high growth is good, high debt is bad).
+
+*   **ROE (Return on Equity)**: A measure of profitability. It shows how effectively a company uses shareholder investments to generate profit. A higher ROE is generally better.
+*   **P/E Ratio (PE_TTM)**: The Price-to-Earnings ratio compares the company's stock price to its earnings per share over the trailing twelve months (TTM). A lower P/E can indicate a stock is "cheaper" or undervalued.
+*   **Debt/Equity Ratio**: Measures a company's financial leverage by dividing its total debt by its shareholder equity. A high ratio indicates high debt, which can be a risk.
+*   **Revenue Growth (3Y CAGR)**: The Compound Annual Growth Rate of a company's revenue over the last three years. It shows the company's ability to increase its sales over time.
+*   **EPS Growth (1Y)**: The growth in a company's Earnings Per Share over the last year. Strong EPS growth is a positive sign of increasing profitability.
+*   **Free Cash Flow Yield**: This metric compares the free cash flow a company generates to its market value. A higher yield can suggest a company is undervalued and has strong cash generation.
+*   **Payout Ratio**: Used in the "High-Quality Dividend" scan, this shows the percentage of a company's earnings that it pays out to shareholders as dividends. A very high ratio (e.g., >80%) can be a warning sign that the dividend is unsustainable.
 
 ## License
 
