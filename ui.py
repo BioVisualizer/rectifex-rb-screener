@@ -312,6 +312,17 @@ class ChartWindow(QWidget):
             else:
                 plot_data = history_df.copy()
 
+            # Add a check for an empty DataFrame after slicing
+            if plot_data.empty:
+                ax = self.figure.add_subplot(111)
+                ax.text(0.5, 0.5, f"No data available for the selected time period for {candidate.ticker}.",
+                        horizontalalignment='center', verticalalignment='center')
+                self.canvas.draw()
+                return
+
+            # Ensure the index is a DatetimeIndex for mplfinance
+            plot_data.index = pd.to_datetime(plot_data.index)
+
             # --- Indicator Calculations ---
             if 'SMA50' not in plot_data.columns:
                 plot_data['SMA50'] = calculate_sma(plot_data['Close'], 50)
@@ -342,13 +353,7 @@ class ChartWindow(QWidget):
                 fib_levels[0.0] = highest_high
                 fib_levels[100.0] = lowest_low
 
-                hlines_fib = dict(
-                    hlines=[level for level in fib_levels.values()],
-                    colors=['#999999'] * len(fib_levels), # A neutral grey
-                    linestyle='-.',
-                    linewidths=0.6,
-                    alpha=0.9
-                )
+                # The hlines will be drawn manually below.
 
             # --- Axes Creation ---
             gs = self.figure.add_gridspec(4, 1, height_ratios=[6, 1, 2, 2], hspace=0.05)
@@ -412,13 +417,14 @@ class ChartWindow(QWidget):
                      addplot=add_plots,
                      style='yahoo',
                      xrotation=20,
-                     hlines=hlines_fib if hlines_fib else None)
+                     xlim=(plot_data.index[0], plot_data.index[-1]))
 
-            # Manually set x-axis limits to fit the data, which fixes the squished chart issue.
-            price_ax.set_xlim(plot_data.index[0], plot_data.index[-1])
-
-            # --- Add Fibonacci Labels ---
+            # --- Add Fibonacci Lines and Labels ---
             if fib_levels:
+                # Manually draw the horizontal lines for each Fibonacci level.
+                for level_price in fib_levels.values():
+                    price_ax.axhline(level_price, color='#999999', linestyle='-.', linewidth=0.6, alpha=0.9)
+
                 # Use a transform that combines data y-coords with axes x-coords
                 transform = price_ax.get_yaxis_transform()
                 # Sort levels for cleaner labeling if they overlap
