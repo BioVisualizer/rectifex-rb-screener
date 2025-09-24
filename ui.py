@@ -313,12 +313,16 @@ class ChartWidget(QWidget):
 
             plot_data.index = pd.to_datetime(plot_data.index)
 
-            # Create axes for a compact view (Price+Volume, RSI)
-            gs = self.figure.add_gridspec(2, 1, height_ratios=[3, 1], hspace=0.1)
+            # Create axes for a compact view (Price, Volume, RSI)
+            gs = self.figure.add_gridspec(3, 1, height_ratios=[3, 1, 1], hspace=0.1)
             price_ax = self.figure.add_subplot(gs[0, 0])
-            rsi_ax = self.figure.add_subplot(gs[1, 0], sharex=price_ax)
+            volume_ax = self.figure.add_subplot(gs[1, 0], sharex=price_ax)
+            rsi_ax = self.figure.add_subplot(gs[2, 0], sharex=price_ax)
 
+            # Hide x-axis labels on the upper panels for a cleaner look
             price_ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+            volume_ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+
 
             # Calculate RSI
             if 'RSI' not in plot_data.columns:
@@ -330,12 +334,12 @@ class ChartWidget(QWidget):
             mpf.plot(plot_data,
                      type='candle',
                      ax=price_ax,
-                     volume=True, # Plot volume on the main price axis
+                     volume=volume_ax, # Plot volume on its own axes
                      mav=(20, 50),
                      addplot=add_plots,
                      style='yahoo',
                      xrotation=0,
-                     datetime_format='%b %Y') # Format x-axis dates
+                     datetime_format='%b %Y')
 
             rsi_ax.set_ylabel('RSI')
             rsi_ax.set_ylim(0, 100)
