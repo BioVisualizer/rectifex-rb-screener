@@ -414,6 +414,9 @@ class ChartWindow(QWidget):
                      xrotation=20,
                      hlines=hlines_fib if hlines_fib else None)
 
+            # Manually set x-axis limits to fit the data, which fixes the squished chart issue.
+            price_ax.set_xlim(plot_data.index[0], plot_data.index[-1])
+
             # --- Add Fibonacci Labels ---
             if fib_levels:
                 # Use a transform that combines data y-coords with axes x-coords
@@ -441,7 +444,7 @@ class ChartWindow(QWidget):
 
             # --- Final Styling ---
             self.figure.suptitle(f'{candidate.ticker} - {candidate.scenario}', y=0.98)
-            price_ax.legend(loc='upper left')
+            # price_ax.legend(loc='upper left') # Removed to prevent UserWarning as mplfinance handles MA legends.
             rsi_ax.set_ylabel('RSI')
             macd_ax.set_ylabel('MACD')
 
