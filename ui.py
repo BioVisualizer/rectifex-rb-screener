@@ -494,7 +494,8 @@ class AdvancedSettingsDialog(QDialog):
         # General Settings Group
         general_group = QGroupBox("General Filters")
         general_layout = QFormLayout()
-        self.min_market_cap = QSpinBox()
+        self.min_market_cap = QDoubleSpinBox()
+        self.min_market_cap.setDecimals(0)
         self.min_market_cap.setRange(0, 100_000_000_000)
         self.min_market_cap.setSingleStep(100_000_000)
         self.min_market_cap.setValue(settings.get('min_market_cap'))
@@ -566,6 +567,7 @@ class AdvancedSettingsDialog(QDialog):
         # Clear Cache Button
         self.clear_cache_button = QPushButton("Clear All Cached Data")
         self.clear_cache_button.setToolTip("Deletes all downloaded price and fundamental data. The app will fetch fresh data on the next scan.")
+        self.clear_cache_button.clicked.connect(self.clear_cache)
         layout.addWidget(self.clear_cache_button, 0, Qt.AlignmentFlag.AlignRight)
 
         # OK and Cancel buttons
