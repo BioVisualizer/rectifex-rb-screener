@@ -12,6 +12,30 @@
     "class": "ClassicOversoldScenario"
   },
   {
+    "id": "floor_consolidation_universal",
+    "group": "Contrarian & Reversion",
+    "group_description": "Find stocks moving against the current trend.",
+    "name": "Floor Consolidation - Universal",
+    "description": "Identifies stocks that have entered a stable consolidation phase after a significant price decline, indicating a potential bottom.",
+    "what_it_is": "This scan looks for a three-phase pattern: a recent peak, a sharp drop, and a subsequent period of tight price consolidation on lower volume.",
+    "best_for": "Investors looking to identify potential turnaround candidates that are showing signs of bottoming out after a major crash.",
+    "signals": ["crash_depth", "consolidation_range", "volume_dryup"],
+    "params": {},
+    "class": "FloorConsolidationScenario"
+  },
+  {
+    "id": "floor_consolidation_quality",
+    "group": "Contrarian & Reversion",
+    "group_description": "Find stocks moving against the current trend.",
+    "name": "Floor Consolidation - Quality",
+    "description": "Identifies fundamentally strong stocks that have entered a consolidation phase after a crash, suggesting a high-quality bottoming pattern.",
+    "what_it_is": "This scan first finds stocks matching the 'Universal' floor consolidation pattern, then filters for companies with strong fundamental scores (Fund. Score >= 60) and evidence of a prior long-term uptrend.",
+    "best_for": "Value-oriented investors looking for high-quality companies that have been unfairly punished and are now showing signs of stabilization.",
+    "signals": ["crash_depth", "consolidation_range", "volume_dryup", "strong_fundamentals", "prior_uptrend"],
+    "params": {},
+    "class": "FloorConsolidationScenario"
+  },
+  {
     "id": "mean_reversion_bb",
     "group": "Contrarian & Reversion",
     "group_description": "Find stocks moving against the current trend.",
