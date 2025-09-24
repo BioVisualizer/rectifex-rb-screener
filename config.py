@@ -89,6 +89,16 @@ FD_MIN_REVENUE_GROWTH = 0.05 # Min 5% YoY revenue growth
 FD_MAX_DEBT_TO_EQUITY = 1.0
 FD_MIN_SCORE = 60 # Minimum score to be included in the results
 
+# 5. Floor Consolidation Scenario
+FC_CRASH_LOOKBACK_PERIOD = 126
+FC_MIN_CRASH_DEPTH = 0.25
+FC_CONSOLIDATION_PERIOD_DAYS = 60
+FC_MAX_CONSOLIDATION_RANGE = 0.15
+FC_NO_NEW_LOW_TOLERANCE = 0.03
+FC_VOLUME_RATIO_MAX = 0.70
+FC_MIN_AVG_DAILY_VOLUME = 500000
+FC_MIN_FUND_SCORE = 60
+
 # -- GUI Configuration --
 APP_NAME = "Rectifex RB - Global Rebound Stock Screener"
 # The number of months of historical data to display on the chart.

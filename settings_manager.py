@@ -15,6 +15,16 @@ DEFAULT_SETTINGS = {
     "min_market_cap": 2_000_000_000, # Default to 2 Billion
     "min_avg_volume_30d": 500_000,    # Default to 500,000
     # Add other future user-configurable settings here
+
+    # Floor Consolidation Scenario Settings
+    "fc_crash_lookback_period": 126,
+    "fc_min_crash_depth": 0.25,
+    "fc_consolidation_period_days": 60,
+    "fc_max_consolidation_range": 0.15,
+    "fc_no_new_low_tolerance": 0.03,
+    "fc_volume_ratio_max": 0.70,
+    "fc_min_avg_daily_volume": 500000,
+    "fc_min_fund_score": 60,
 }
 
 class SettingsManager:

@@ -110,7 +110,7 @@ class PandasModel(QAbstractTableModel):
         self._data = data
         self.candidates_data = candidates_data
         self.numeric_columns = [
-            'Rebound Score', 'Tech. Score', 'Fund. Score', 'Price'
+            'Rebound Score', 'Tech. Score', 'Fund. Score', 'Price', 'Floor Score'
         ]
 
     def rowCount(self, parent=None):
@@ -246,7 +246,7 @@ class CustomSortProxyModel(QSortFilterProxyModel):
         column_name = source_model.get_dataframe().columns[col]
 
         # List of columns to sort numerically
-        numeric_sort_columns = ['Rebound Score', 'Tech. Score', 'Fund. Score', 'Price']
+        numeric_sort_columns = ['Rebound Score', 'Tech. Score', 'Fund. Score', 'Price', 'Floor Score']
 
         if column_name in numeric_sort_columns:
             left_data = source_model.data(left, Qt.ItemDataRole.EditRole)
@@ -362,16 +362,46 @@ class ChartWindow(QWidget):
             volume_ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
             rsi_ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
 
+            # --- Scenario-Specific Visualizations ---
+            add_plots = [] # Start with an empty list
+
+            if candidate.scenario and 'Floor Consolidation' in candidate.scenario:
+                technicals = candidate.technicals
+
+                # 1. Markers for high and low
+                high_marker_data = pd.Series(float('nan'), index=plot_data.index)
+                low_marker_data = pd.Series(float('nan'), index=plot_data.index)
+
+                high_idx = technicals.get('period_high_idx')
+                low_idx = technicals.get('drop_low_idx')
+
+                if high_idx and high_idx in high_marker_data.index:
+                    high_marker_data.loc[high_idx] = technicals['period_high_val'] * 1.05
+                if low_idx and low_idx in low_marker_data.index:
+                    low_marker_data.loc[low_idx] = technicals['drop_low_val'] * 0.95
+
+                if not high_marker_data.isnull().all():
+                    add_plots.append(mpf.make_addplot(high_marker_data, type='scatter', marker='v', markersize=100, color='red', ax=price_ax))
+                if not low_marker_data.isnull().all():
+                    add_plots.append(mpf.make_addplot(low_marker_data, type='scatter', marker='^', markersize=100, color='green', ax=price_ax))
+
+                # 2. Shaded consolidation rectangle
+                start_date = technicals.get('consol_start_idx')
+                end_date = technicals.get('consol_end_idx')
+                if start_date and end_date:
+                    price_ax.axvspan(start_date, end_date, color='blue', alpha=0.1)
+
             # --- Plotting with mplfinance ---
             # Create a list of additional plots for the other axes/panels.
             # By passing the `ax` to `make_addplot`, we tell mplfinance to draw
             # on our existing axes instead of creating new panels.
-            add_plots = [
+            # Add standard indicators after scenario-specific ones
+            add_plots.extend([
                 mpf.make_addplot(plot_data['RSI'], ax=rsi_ax),
                 mpf.make_addplot(macd_line, ax=macd_ax),
                 mpf.make_addplot(signal_line, ax=macd_ax, color='red'), # MACD signal line
                 mpf.make_addplot(macd_hist, type='bar', ax=macd_ax, color='grey', alpha=0.5)
-            ]
+            ])
 
             # The main plot call uses the main axes and adds the others.
             mpf.plot(plot_data,
@@ -450,6 +480,128 @@ class ChartWindow(QWidget):
 
 
 from PyQt6.QtCore import QTimer, QPropertyAnimation, QEasingCurve, QRect
+from PyQt6.QtWidgets import QDialog, QFormLayout, QDialogButtonBox, QSpinBox, QDoubleSpinBox, QGroupBox
+from settings_manager import settings
+
+class AdvancedSettingsDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Advanced Scan Settings")
+        self.setMinimumWidth(450)
+
+        layout = QVBoxLayout(self)
+
+        # General Settings Group
+        general_group = QGroupBox("General Filters")
+        general_layout = QFormLayout()
+        self.min_market_cap = QSpinBox()
+        self.min_market_cap.setRange(0, 100_000_000_000)
+        self.min_market_cap.setSingleStep(100_000_000)
+        self.min_market_cap.setValue(settings.get('min_market_cap'))
+        self.min_market_cap.setToolTip("Minimum market capitalization in USD.")
+        general_layout.addRow("Min. Market Cap:", self.min_market_cap)
+
+        self.min_avg_volume = QSpinBox()
+        self.min_avg_volume.setRange(0, 100_000_000)
+        self.min_avg_volume.setSingleStep(50_000)
+        self.min_avg_volume.setValue(settings.get('min_avg_volume_30d'))
+        self.min_avg_volume.setToolTip("Minimum 30-day average trading volume.")
+        general_layout.addRow("Min. Avg. Volume (30d):", self.min_avg_volume)
+        general_group.setLayout(general_layout)
+        layout.addWidget(general_group)
+
+        # Floor Consolidation Settings Group
+        fc_group = QGroupBox("Floor Consolidation Scan")
+        fc_layout = QFormLayout()
+
+        self.fc_crash_lookback = QSpinBox()
+        self.fc_crash_lookback.setRange(30, 365)
+        self.fc_crash_lookback.setValue(settings.get('fc_crash_lookback_period'))
+        self.fc_crash_lookback.setToolTip("Days to look back for a crash peak (~6mo default).")
+        fc_layout.addRow("Crash Lookback Period (days):", self.fc_crash_lookback)
+
+        self.fc_min_crash_depth = QDoubleSpinBox()
+        self.fc_min_crash_depth.setRange(0.10, 0.90)
+        self.fc_min_crash_depth.setSingleStep(0.05)
+        self.fc_min_crash_depth.setValue(settings.get('fc_min_crash_depth'))
+        self.fc_min_crash_depth.setToolTip("Minimum drop from the peak to be considered a crash (e.g., 0.25 for 25%).")
+        fc_layout.addRow("Min. Crash Depth (%):", self.fc_min_crash_depth)
+
+        self.fc_consolidation_days = QSpinBox()
+        self.fc_consolidation_days.setRange(10, 120)
+        self.fc_consolidation_days.setValue(settings.get('fc_consolidation_period_days'))
+        self.fc_consolidation_days.setToolTip("Days to analyze for the consolidation floor (~3mo default).")
+        fc_layout.addRow("Consolidation Period (days):", self.fc_consolidation_days)
+
+        self.fc_max_consolidation_range = QDoubleSpinBox()
+        self.fc_max_consolidation_range.setRange(0.05, 0.50)
+        self.fc_max_consolidation_range.setSingleStep(0.01)
+        self.fc_max_consolidation_range.setValue(settings.get('fc_max_consolidation_range'))
+        self.fc_max_consolidation_range.setToolTip("Maximum price fluctuation within the floor (e.g., 0.15 for 15%).")
+        fc_layout.addRow("Max. Consolidation Range (%):", self.fc_max_consolidation_range)
+
+        self.fc_no_new_low_tolerance = QDoubleSpinBox()
+        self.fc_no_new_low_tolerance.setRange(0.00, 0.20)
+        self.fc_no_new_low_tolerance.setSingleStep(0.01)
+        self.fc_no_new_low_tolerance.setValue(settings.get('fc_no_new_low_tolerance'))
+        self.fc_no_new_low_tolerance.setToolTip("How much a new low can undercut the initial drop low (e.g., 0.03 for 3%).")
+        fc_layout.addRow("New Low Tolerance (%):", self.fc_no_new_low_tolerance)
+
+        self.fc_volume_ratio_max = QDoubleSpinBox()
+        self.fc_volume_ratio_max.setRange(0.10, 2.00)
+        self.fc_volume_ratio_max.setSingleStep(0.10)
+        self.fc_volume_ratio_max.setValue(settings.get('fc_volume_ratio_max'))
+        self.fc_volume_ratio_max.setToolTip("Consolidation volume must be <= this ratio of pre-crash volume (e.g., 0.70).")
+        fc_layout.addRow("Max. Volume Ratio:", self.fc_volume_ratio_max)
+
+        self.fc_min_fund_score = QSpinBox()
+        self.fc_min_fund_score.setRange(0, 100)
+        self.fc_min_fund_score.setValue(settings.get('fc_min_fund_score'))
+        self.fc_min_fund_score.setToolTip("Minimum Fundamental Score for the 'Quality' version of the scan.")
+        fc_layout.addRow("Min. Fundamental Score (Quality):", self.fc_min_fund_score)
+
+        fc_group.setLayout(fc_layout)
+        layout.addWidget(fc_group)
+
+        # Clear Cache Button
+        self.clear_cache_button = QPushButton("Clear All Cached Data")
+        self.clear_cache_button.setToolTip("Deletes all downloaded price and fundamental data. The app will fetch fresh data on the next scan.")
+        layout.addWidget(self.clear_cache_button, 0, Qt.AlignmentFlag.AlignRight)
+
+        # OK and Cancel buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def clear_cache(self):
+        reply = QMessageBox.question(self, "Confirm Cache Deletion",
+                                     f"Are you sure you want to delete all cached data from {config.CACHE_DIR}?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                     QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                shutil.rmtree(config.CACHE_DIR)
+                config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                QMessageBox.information(self, "Success", "Cache successfully cleared.")
+            except Exception as e:
+                QMessageBox.critical(self, "Cache Error", f"Failed to clear cache: {e}")
+
+    def accept(self):
+        # General
+        settings.set('min_market_cap', self.min_market_cap.value())
+        settings.set('min_avg_volume_30d', self.min_avg_volume.value())
+        # Floor Consolidation
+        settings.set('fc_crash_lookback_period', self.fc_crash_lookback.value())
+        settings.set('fc_min_crash_depth', self.fc_min_crash_depth.value())
+        settings.set('fc_consolidation_period_days', self.fc_consolidation_days.value())
+        settings.set('fc_max_consolidation_range', self.fc_max_consolidation_range.value())
+        settings.set('fc_no_new_low_tolerance', self.fc_no_new_low_tolerance.value())
+        settings.set('fc_volume_ratio_max', self.fc_volume_ratio_max.value())
+        settings.set('fc_min_fund_score', self.fc_min_fund_score.value())
+
+        super().accept()
+
 # --- Main Application Window ---
 
 class ToastNotification(QFrame):
@@ -1088,21 +1240,9 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def open_settings_dialog(self):
-        """
-        Opens a settings dialog.
-        For now, it just contains the 'Clear Cache' functionality.
-        """
-        reply = QMessageBox.question(self, "Confirm Cache Deletion",
-                                     f"Are you sure you want to delete all cached data from {config.CACHE_DIR}?",
-                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                     QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                shutil.rmtree(config.CACHE_DIR)
-                config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
-                self.status_bar.showMessage("Cache successfully cleared.", 5000)
-            except Exception as e:
-                QMessageBox.critical(self, "Cache Error", f"Failed to clear cache: {e}")
+        """Opens the advanced settings dialog."""
+        dialog = AdvancedSettingsDialog(self)
+        dialog.exec()
 
     def show_about_dialog(self):
         """Shows a simple 'About' dialog."""
@@ -1243,33 +1383,43 @@ class MainWindow(QMainWindow):
         self.stacked_widget.setCurrentIndex(1)
 
         # Convert list of ReboundCandidate objects to a list of dicts for the DataFrame
-        # The main table will only show universally applicable columns.
-        # Scenario-specific details (like RSI/Prox scores) are in the tooltip.
         display_results_list = []
         scenarios = ScenarioRunner.load_scenarios_config()
-        scenario_name = next((s['name'] for s in scenarios if s['id'] == self.activeScan), "")
+        scenario_config = next((s for s in scenarios if s['id'] == self.activeScan), None)
+        scenario_name = scenario_config['name'] if scenario_config else ""
+
+        is_floor_scan = self.activeScan and 'floor_consolidation' in self.activeScan
 
         for r in results:
-            # Format ROE as a percentage string, handling None
             roe_val = r.fundamentals.get('roe')
             roe_str = f"{roe_val * 100:.2f}%" if roe_val is not None else "N/A"
 
-            # TODO: Fetch and add Change %
-            # TODO: Add placeholder for Sparkline
             res_dict = {
                 "Ticker": r.ticker,
                 "Name": r.fundamentals.get('name', 'N/A'),
                 "Price": f"${r.technicals.get('price', 0):.2f}",
-                "Change %": "0.00%", # Placeholder
                 "Rebound Score": r.rebound_score,
-                "Tech. Score": r.technical_score,
                 "Fund. Score": r.fundamental_score,
-                "ROE": roe_str,
-                "Sparkline": "" # Placeholder for the delegate
+                "ROE": roe_str
             }
+
+            if is_floor_scan:
+                res_dict["Floor Score"] = r.technical_score
+                res_dict["Crash %"] = r.technicals.get('Crash %', 'N/A')
+                res_dict["Consol. Range %"] = r.technicals.get('Consol. Range %', 'N/A')
+                res_dict["Drop Date"] = r.technicals.get('Drop Date', 'N/A')
+            else:
+                # Only show generic "Tech. Score" for other scans
+                res_dict["Tech. Score"] = r.technical_score
+
             display_results_list.append(res_dict)
 
         self.results_df = pd.DataFrame(display_results_list)
+
+        # Reorder columns for display consistency
+        if is_floor_scan:
+            cols_order = ["Ticker", "Name", "Price", "Floor Score", "Crash %", "Consol. Range %", "Drop Date", "Rebound Score", "Fund. Score", "ROE"]
+            self.results_df = self.results_df[cols_order]
         self.results_summary_label.setText(f"Found {len(results)} results for \"{scenario_name}\" scan.")
         # Keep the original full candidate objects for charting and for detailed tooltips
         self.all_candidates_data = results
@@ -1289,12 +1439,21 @@ class MainWindow(QMainWindow):
         self.table_view.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Szenario
 
 
-        # Automatically sort by the 'Rebound Score' column, descending
+        # Automatically sort by the appropriate score column, descending
+        sort_column_name = "Rebound Score" # Default sort column
+        if self.activeScan == 'floor_consolidation_universal':
+            sort_column_name = "Floor Score"
+
         try:
-            score_col_index = self.results_df.columns.get_loc("Rebound Score")
+            score_col_index = self.results_df.columns.get_loc(sort_column_name)
             self.table_view.sortByColumn(score_col_index, Qt.SortOrder.DescendingOrder)
         except KeyError:
-            pass # No score column
+            # Fallback to Rebound Score if the primary sort column isn't found for some reason
+            try:
+                score_col_index = self.results_df.columns.get_loc("Rebound Score")
+                self.table_view.sortByColumn(score_col_index, Qt.SortOrder.DescendingOrder)
+            except KeyError:
+                pass # No score columns found to sort by
 
         has_results = not self.results_df.empty
         self.export_csv_action.setEnabled(has_results)

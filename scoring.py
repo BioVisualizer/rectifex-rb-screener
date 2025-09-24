@@ -173,6 +173,57 @@ def compute_market_context_score(index_ohlc: Optional[pd.DataFrame]) -> int:
         return 50 # Neutral on error
 
 
+def compute_floor_score(
+    consolidation_range_pct: float,
+    max_consolidation_range: float,
+    crash_depth_pct: float,
+    volume_ratio: float,
+    current_price: float,
+    consol_low: float,
+    consol_high: float
+) -> Tuple[int, Dict[str, Any]]:
+    """
+    Computes the Floor Score (0-100) for the Floor Consolidation scenario.
+    """
+    breakdown = {}
+
+    # 1. Consolidation Tightness (40% weight)
+    # Inverse of consolidation_range. A tighter range gets a higher score.
+    tightness_sub_score = 100 * (1 - (consolidation_range_pct / max_consolidation_range))
+    tightness_sub_score = clamp(tightness_sub_score, 0, 100)
+    breakdown['consolidation_tightness_sub_score'] = int(tightness_sub_score)
+
+    # 2. Crash Severity (20% weight)
+    # A deeper crash gets a higher score (up to a reasonable limit, e.g., 60%).
+    severity_sub_score = (crash_depth_pct / 0.60) * 100
+    severity_sub_score = clamp(severity_sub_score, 0, 100)
+    breakdown['crash_severity_sub_score'] = int(severity_sub_score)
+
+    # 3. Volume Dry-Up (20% weight)
+    # A lower volume_ratio gets a higher score.
+    volume_sub_score = 100 * (1 - volume_ratio)
+    volume_sub_score = clamp(volume_sub_score, 0, 100)
+    breakdown['volume_dry_up_sub_score'] = int(volume_sub_score)
+
+    # 4. Price Position Bonus (20% weight)
+    # A price closer to the bottom of the consolidation range gets a higher score.
+    price_position_sub_score = 0
+    if (consol_high - consol_low) > 0:
+        price_position_sub_score = 100 * (1 - ((current_price - consol_low) / (consol_high - consol_low)))
+    price_position_sub_score = clamp(price_position_sub_score, 0, 100)
+    breakdown['price_position_sub_score'] = int(price_position_sub_score)
+
+    # Final weighted score
+    final_score = (
+        tightness_sub_score * 0.40 +
+        severity_sub_score * 0.20 +
+        volume_sub_score * 0.20 +
+        price_position_sub_score * 0.20
+    )
+
+    return int(round(clamp(final_score, 0, 100))), breakdown
+
+
 def compute_rebound_score(
     tech_score: int,
     fund_score: int,

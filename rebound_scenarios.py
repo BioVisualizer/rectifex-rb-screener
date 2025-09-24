@@ -25,6 +25,7 @@ from scoring import (
     DIVIDEND_SCENARIO_FUNDAMENTAL_WEIGHTS,
     DIVERGENCE_SCENARIO_FUNDAMENTAL_WEIGHTS,
     DEFAULT_REBOUND_SCORE_WEIGHTS,
+    compute_floor_score,
 )
 
 # --- Indicator Functions ---
@@ -308,6 +309,158 @@ class HighQualityDividendScenario(BaseScenario):
         technicals_dict = {'price': round(stock_data['Close'].iloc[-1], 2) if not stock_data.empty else 'N/A'}
         return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, rebound_score=0, technical_score=technical_score, history_df=stock_data, fundamentals=self._get_fundamentals_for_candidate(fundamental_data, stock_info), technicals=technicals_dict, score_breakdown=score_breakdown)
 
+class FloorConsolidationScenario(BaseScenario):
+    """
+    Identifies stocks that, after a significant price decline, have entered a stable
+    consolidation phase, indicating a potential bottom.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Import settings manager here to avoid circular dependencies at module level
+        from settings_manager import settings
+        self.settings = settings
+        self.crash_lookback_period = self.settings.get('fc_crash_lookback_period')
+        self.consolidation_period_days = self.settings.get('fc_consolidation_period_days')
+        self.min_data_days = self.crash_lookback_period + self.consolidation_period_days + 30 # Add a buffer
+
+    def run(self, stock_data: pd.DataFrame, fundamental_data: Dict, stock_info: Dict) -> Optional[ReboundCandidate]:
+        # 0. Initial Data Check
+        if stock_data is None or len(stock_data) < self.min_data_days:
+            return None
+
+        # --- 1. Crash Detection ---
+        lookback_data = stock_data.iloc[-(self.crash_lookback_period + self.consolidation_period_days) : -self.consolidation_period_days]
+        if lookback_data.empty:
+            return None
+
+        peak_idx = lookback_data['High'].idxmax()
+        period_high = lookback_data['High'].loc[peak_idx]
+
+        data_after_peak = stock_data.loc[peak_idx:]
+        search_for_low_data = data_after_peak.iloc[:-self.consolidation_period_days]
+        if search_for_low_data.empty:
+            return None
+
+        drop_low_idx = search_for_low_data['Low'].idxmin()
+        drop_low = search_for_low_data['Low'].loc[drop_low_idx]
+        drop_date = drop_low_idx.strftime('%Y-%m-%d')
+
+        crash_depth = (period_high - drop_low) / period_high if period_high > 0 else 0
+        if crash_depth < self.settings.get('fc_min_crash_depth'):
+            return None
+
+        # --- 2. Consolidation Verification ---
+        consolidation_data = stock_data.tail(self.consolidation_period_days)
+        if consolidation_data.empty:
+            return None
+
+        consol_high = consolidation_data['High'].max()
+        consol_low = consolidation_data['Low'].min()
+
+        consolidation_range_pct = (consol_high - consol_low) / consol_low if consol_low > 0 else 0
+        if consolidation_range_pct > self.settings.get('fc_max_consolidation_range'):
+            return None
+
+        if consol_low < drop_low * (1 - self.settings.get('fc_no_new_low_tolerance')):
+            return None
+
+        avg_volume_consolidation = consolidation_data['Volume'].mean()
+
+        pre_crash_volume_data = stock_data.loc[peak_idx:drop_low_idx]['Volume']
+        if pre_crash_volume_data.empty or len(pre_crash_volume_data) <= 1:
+            return None
+        avg_volume_pre_crash = pre_crash_volume_data.mean()
+
+        if avg_volume_pre_crash == 0:
+            return None
+
+        volume_ratio = avg_volume_consolidation / avg_volume_pre_crash
+        if volume_ratio > self.settings.get('fc_volume_ratio_max'):
+            return None
+
+        if avg_volume_consolidation < self.settings.get('fc_min_avg_daily_volume'):
+            return None
+
+        # --- 3. Quality Scan Filters (if applicable) ---
+        if 'Quality' in self.name:
+            # a. Fundamental Strength Check
+            if not fundamental_data or not fundamental_data.get('metrics'):
+                logging.info(f"Skipping {stock_info['ticker']} for Quality scan: Missing fundamental data.")
+                return None
+
+            sector_stats = {}
+            if SECTOR_MEDIANS_FILE.exists():
+                with open(SECTOR_MEDIANS_FILE, 'r') as f: sector_stats = json.load(f)
+
+            fund_score, _ = compute_fundamental_score(
+                fundamentals=fundamental_data['metrics'],
+                sector=fundamental_data.get('sector', 'N/A'),
+                sector_stats=sector_stats,
+                weights=DEFAULT_FUNDAMENTAL_WEIGHTS
+            )
+
+            if fund_score < self.settings.get('fc_min_fund_score'):
+                return None
+
+            # b. Long-Term Trend Context Check
+            if 'SMA200' not in stock_data.columns:
+                stock_data['SMA200'] = calculate_sma(stock_data['Close'], 200)
+
+            trend_lookback_days = 63 # ~3 months
+            try:
+                peak_loc = stock_data.index.get_loc(peak_idx)
+                if peak_loc < trend_lookback_days: return None
+
+                sma_at_peak = stock_data['SMA200'].iloc[peak_loc]
+                sma_before_peak = stock_data['SMA200'].iloc[peak_loc - trend_lookback_days]
+
+                if pd.isna(sma_at_peak) or pd.isna(sma_before_peak): return None
+                if not sma_at_peak > sma_before_peak: return None # SMA must be rising
+            except KeyError:
+                return None # peak_idx not in dataframe index
+
+        # --- 4. Scoring & Candidate Creation ---
+        self._emit_progress(f"!!! {stock_info['ticker']} is a potential '{self.name}' candidate.")
+
+        current_price = stock_data['Close'].iloc[-1]
+
+        floor_score, score_breakdown = compute_floor_score(
+            consolidation_range_pct=consolidation_range_pct,
+            max_consolidation_range=self.settings.get('fc_max_consolidation_range'),
+            crash_depth_pct=crash_depth,
+            volume_ratio=volume_ratio,
+            current_price=current_price,
+            consol_low=consol_low,
+            consol_high=consol_high
+        )
+
+        technicals_dict = {
+            'price': round(current_price, 2),
+            'Floor Score': floor_score,
+            'Crash %': f"{crash_depth:.1%}",
+            'Consol. Range %': f"{consolidation_range_pct:.1%}",
+            'Drop Date': drop_date,
+            # Data for charting
+            'period_high_val': period_high,
+            'period_high_idx': peak_idx,
+            'drop_low_val': drop_low,
+            'drop_low_idx': drop_low_idx,
+            'consol_start_idx': consolidation_data.index[0],
+            'consol_end_idx': consolidation_data.index[-1],
+        }
+
+        return ReboundCandidate(
+            ticker=stock_info['ticker'],
+            scenario=self.name,
+            rebound_score=0,
+            technical_score=floor_score,
+            fundamentals=self._get_fundamentals_for_candidate(fundamental_data, stock_info),
+            history_df=stock_data,
+            technicals=technicals_dict,
+            score_breakdown=score_breakdown
+        )
+
+
 class FundamentalDivergenceScenario(BaseScenario):
     """Identifies fundamentally strong stocks whose price has been stagnating."""
     def __init__(self, *args, **kwargs):
@@ -378,6 +531,7 @@ class ScenarioRunner:
         "FundamentalDivergenceScenario": FundamentalDivergenceScenario, "MomentumBreakoutScenario": MomentumBreakoutScenario,
         "GoldenCrossScenario": GoldenCrossScenario, "MeanReversionScenario": MeanReversionScenario,
         "VolatilitySqueezeScenario": VolatilitySqueezeScenario, "HighQualityDividendScenario": HighQualityDividendScenario,
+        "FloorConsolidationScenario": FloorConsolidationScenario,
     }
     def __init__(self, progress_callback: Callable = None, progress_percent_callback: Callable = None, is_cancelled_callback: Callable = None):
         self.progress_callback = progress_callback; self.progress_percent_callback = progress_percent_callback
