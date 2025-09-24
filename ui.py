@@ -16,7 +16,7 @@ from PyQt6.QtCore import (
     QObject, QThread, pyqtSignal, QAbstractTableModel, Qt, QSortFilterProxyModel, QRegularExpression
 )
 from PyQt6.QtGui import QColor, QIcon, QPixmap, QPainter, QPainterPath
-from PyQt6.QtWidgets import QFrame, QScrollArea, QMenu
+from PyQt6.QtWidgets import QFrame, QScrollArea, QMenu, QButtonGroup
 
 # For charting
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -308,9 +308,9 @@ class ChartWindow(QWidget):
             # Limit data to the configured number of months for charting
             if not history_df.empty and config.CHART_HISTORY_MONTHS > 0:
                 cutoff_date = history_df.index.max() - pd.DateOffset(months=config.CHART_HISTORY_MONTHS)
-                plot_data = history_df.loc[cutoff_date:]
+                plot_data = history_df.loc[cutoff_date:].copy()
             else:
-                plot_data = history_df
+                plot_data = history_df.copy()
 
             # --- Indicator Calculations ---
             if 'SMA50' not in plot_data.columns:
@@ -675,6 +675,8 @@ class ScanCategoryCard(QFrame):
     def __init__(self, title, description, icon_char, sub_strategies, parent=None):
         super().__init__(parent)
         self.sub_strategy_buttons = {}
+        self.button_group = QButtonGroup(self)
+        self.button_group.setExclusive(True)
 
         self.setObjectName("ScanCategoryCard")
         self.setFrameShape(QFrame.Shape.StyledPanel)
@@ -710,7 +712,7 @@ class ScanCategoryCard(QFrame):
             btn = QPushButton(strategy['name'])
             btn.setObjectName("SubStrategyButton")
             btn.setCheckable(True)
-            btn.setAutoExclusive(True)
+            # btn.setAutoExclusive(True) # This is now handled by QButtonGroup
             btn.setStyleSheet("""
                 QPushButton#SubStrategyButton {
                     text-align: left;
@@ -731,6 +733,7 @@ class ScanCategoryCard(QFrame):
             # Use a lambda to capture the current strategy's ID
             btn.clicked.connect(lambda checked, s_id=strategy['id']: self.strategySelected.emit(s_id))
             self.sub_strategy_buttons[strategy['id']] = btn
+            self.button_group.addButton(btn)
             sub_strategies_layout.addWidget(btn)
 
         layout.addWidget(title_label)
@@ -738,9 +741,13 @@ class ScanCategoryCard(QFrame):
         layout.addLayout(sub_strategies_layout)
 
     def uncheck_all(self):
-        """Unchecks all buttons in this card."""
-        for btn in self.sub_strategy_buttons.values():
-            btn.setChecked(False)
+        """Unchecks all buttons in this card by deselecting the checked one."""
+        checked_button = self.button_group.checkedButton()
+        if checked_button:
+            # Temporarily disable exclusivity to allow programmatically unchecking
+            self.button_group.setExclusive(False)
+            checked_button.setChecked(False)
+            self.button_group.setExclusive(True)
 
 class MainWindow(QMainWindow):
     """The main window of the application."""
