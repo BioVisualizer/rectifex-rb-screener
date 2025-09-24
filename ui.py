@@ -583,7 +583,12 @@ class AdvancedSettingsDialog(QDialog):
             try:
                 shutil.rmtree(config.CACHE_DIR)
                 config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
-                QMessageBox.information(self, "Success", "Cache successfully cleared.")
+                # Use the main window's status bar for notifications to avoid instability.
+                main_window = self.parent()
+                if main_window and hasattr(main_window, 'status_bar'):
+                    main_window.status_bar.showMessage("Cache successfully cleared.", 5000)
+                else:
+                    QMessageBox.information(self, "Success", "Cache successfully cleared.")
             except Exception as e:
                 QMessageBox.critical(self, "Cache Error", f"Failed to clear cache: {e}")
 
