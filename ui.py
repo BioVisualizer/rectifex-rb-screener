@@ -268,6 +268,92 @@ class CustomSortProxyModel(QSortFilterProxyModel):
         return super().lessThan(left, right)
 
 
+# --- Charting Widget (for embedding) ---
+class ChartWidget(QWidget):
+    """An embeddable widget for displaying a stock chart."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(250) # Give it a reasonable minimum height
+        self.figure = Figure(figsize=(5, 4), dpi=100)
+        self.canvas = FigureCanvas(self.figure)
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0,0,0,0)
+        layout.addWidget(self.canvas)
+        self.setLayout(layout)
+
+    def plot_stock_data(self, candidate: ReboundCandidate):
+        """
+        Generates and displays a stock chart on the embedded canvas.
+        This is a simplified version of the one in ChartWindow.
+        """
+        try:
+            self.figure.clear()
+
+            if candidate.history_df is None or candidate.history_df.empty:
+                ax = self.figure.add_subplot(111)
+                ax.text(0.5, 0.5, f"No data for {candidate.ticker}",
+                        horizontalalignment='center', verticalalignment='center')
+                self.canvas.draw()
+                return
+
+            history_df = candidate.history_df.copy()
+
+            if not history_df.empty and config.CHART_HISTORY_MONTHS > 0:
+                cutoff_date = history_df.index.max() - pd.DateOffset(months=config.CHART_HISTORY_MONTHS)
+                plot_data = history_df.loc[cutoff_date:].copy()
+            else:
+                plot_data = history_df.copy()
+
+            if plot_data.empty:
+                ax = self.figure.add_subplot(111)
+                ax.text(0.5, 0.5, "No data in range.",
+                        horizontalalignment='center', verticalalignment='center')
+                self.canvas.draw()
+                return
+
+            plot_data.index = pd.to_datetime(plot_data.index)
+
+            # Create axes for a compact view (Price+Volume, RSI)
+            gs = self.figure.add_gridspec(2, 1, height_ratios=[3, 1], hspace=0.1)
+            price_ax = self.figure.add_subplot(gs[0, 0])
+            rsi_ax = self.figure.add_subplot(gs[1, 0], sharex=price_ax)
+
+            price_ax.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+
+            # Calculate RSI
+            if 'RSI' not in plot_data.columns:
+                plot_data['RSI'] = calculate_rsi(plot_data['Close'])
+
+            # Add RSI to a separate panel
+            add_plots = [mpf.make_addplot(plot_data['RSI'], ax=rsi_ax)]
+
+            mpf.plot(plot_data,
+                     type='candle',
+                     ax=price_ax,
+                     volume=True, # Plot volume on the main price axis
+                     mav=(20, 50),
+                     addplot=add_plots,
+                     style='yahoo',
+                     xrotation=0,
+                     datetime_format='%b %Y') # Format x-axis dates
+
+            rsi_ax.set_ylabel('RSI')
+            rsi_ax.set_ylim(0, 100)
+            rsi_ax.axhline(70, color='red', linestyle='--', linewidth=0.7)
+            rsi_ax.axhline(30, color='green', linestyle='--', linewidth=0.7)
+
+            self.figure.tight_layout()
+            self.canvas.draw()
+
+        except Exception as e:
+            logging.error(f"Failed to plot embedded chart for {candidate.ticker}: {e}", exc_info=True)
+            self.figure.clear()
+            ax = self.figure.add_subplot(111)
+            ax.text(0.5, 0.5, f"Chart Error: {e}",
+                    horizontalalignment='center', verticalalignment='center', wrap=True)
+            self.canvas.draw()
+
+
 # --- Charting Window ---
 class ChartWindow(QWidget):
     """A separate window for displaying a detailed, scalable stock chart."""
@@ -1069,8 +1155,8 @@ class MainWindow(QMainWindow):
 
         source_index = self.table_view.model().mapToSource(index)
         if source_index.row() < len(self.all_candidates_data):
-            candidate = self.all_candidates_data[source_index.row()]
-            self.selected_ticker_for_detail = candidate.ticker # Store for error messages
+            self.selected_candidate = self.all_candidates_data[source_index.row()]
+            self.selected_ticker_for_detail = self.selected_candidate.ticker # Store for error messages
 
             # Clear previous content and show loading message immediately
             self.clear_layout(self.ticker_detail_layout)
@@ -1080,7 +1166,7 @@ class MainWindow(QMainWindow):
 
             # Create and run worker
             self.detail_thread = QThread()
-            self.detail_worker = TickerDetailWorker(candidate.ticker)
+            self.detail_worker = TickerDetailWorker(self.selected_candidate.ticker)
             self.detail_worker.moveToThread(self.detail_thread)
 
             self.detail_thread.started.connect(self.detail_worker.run)
@@ -1119,10 +1205,11 @@ class MainWindow(QMainWindow):
         title = QLabel(f"<b>{info.get('shortName', ticker)}</b> ({ticker})")
         title.setStyleSheet("font-size: 16px; margin-bottom: 5px;")
 
-        chart_placeholder = QLabel("Chart will be here")
-        chart_placeholder.setMinimumHeight(150)
-        chart_placeholder.setStyleSheet("background-color: #e0e0e0; border: 1px solid #ccc;")
-        chart_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # --- Chart Integration ---
+        chart_widget = ChartWidget(self)
+        # We need the candidate object which we stored in on_ticker_selected
+        if hasattr(self, 'selected_candidate'):
+            chart_widget.plot_stock_data(self.selected_candidate)
 
         def format_market_cap(mc):
             if mc is None: return "N/A"
@@ -1147,7 +1234,7 @@ class MainWindow(QMainWindow):
         bio_text.setWordWrap(True)
 
         self.ticker_detail_layout.addWidget(title)
-        self.ticker_detail_layout.addWidget(chart_placeholder)
+        self.ticker_detail_layout.addWidget(chart_widget) # Add the chart widget
         self.ticker_detail_layout.addWidget(metrics_label)
         self.ticker_detail_layout.addWidget(bio_title)
         self.ticker_detail_layout.addWidget(bio_text)
