@@ -312,14 +312,6 @@ class ChartWindow(QWidget):
             else:
                 plot_data = history_df.copy()
 
-            # --- DEBUG LOGGING ---
-            logging.info(f"--- Chart Data Debug for {candidate.ticker} ---")
-            logging.info(f"Plot data shape: {plot_data.shape}")
-            logging.info(f"Plot data head:\n{plot_data.head()}")
-            logging.info(f"Plot data tail:\n{plot_data.tail()}")
-            logging.info(f"Plot data nulls:\n{plot_data.isnull().sum()}")
-            logging.info("--- End Chart Data Debug ---")
-
             # --- Indicator Calculations ---
             if 'SMA50' not in plot_data.columns:
                 plot_data['SMA50'] = calculate_sma(plot_data['Close'], 50)

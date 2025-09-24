@@ -241,6 +241,10 @@ async def get_stock_data(ticker: str) -> pd.DataFrame | None:
         # Drop rows with NaN values which can be returned by yfinance
         data.dropna(inplace=True)
 
+        if data.empty:
+            logging.warning(f"DataFrame for {ticker} is empty after dropping NaNs. Not caching.")
+            return None
+
         # Save to cache in an executor as well to avoid blocking
         save_func = functools.partial(data.to_csv, cache_file)
         await loop.run_in_executor(None, save_func)
