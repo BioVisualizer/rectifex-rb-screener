@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Callable, Optional
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from curl_cffi.requests import AsyncSession
+# from curl_cffi.requests import AsyncSession # This was causing issues
 
 import config
 
@@ -22,7 +22,8 @@ SECTOR_MEDIANS_FILE = CACHE_DIR / "sector_medians.json"
 class FundamentalDataHandler:
     def __init__(self):
         FUNDAMENTALS_DIR.mkdir(parents=True, exist_ok=True)
-        self.session = AsyncSession(impersonate="chrome110")
+        # yfinance will manage its own session internally.
+        # self.session = AsyncSession(impersonate="chrome110") # This was causing issues.
 
     def _get_cached_data(self, ticker: str) -> Optional[Dict[str, Any]]:
         cache_file = FUNDAMENTALS_DIR / f"{ticker}.json"
@@ -48,7 +49,8 @@ class FundamentalDataHandler:
         base_wait_time = 2
         for attempt in range(max_retries):
             try:
-                stock = await asyncio.to_thread(yf.Ticker, ticker, session=self.session)
+                # Let yfinance handle its own session
+                stock = await asyncio.to_thread(yf.Ticker, ticker)
                 # Fetch the full info dictionary
                 info = await asyncio.to_thread(lambda: stock.info)
 
@@ -117,7 +119,8 @@ class FundamentalDataHandler:
 
     async def get_full_ticker_info(self, ticker: str) -> Optional[Dict[str, Any]]:
         try:
-            stock = await asyncio.to_thread(yf.Ticker, ticker, session=self.session)
+            # Let yfinance handle its own session
+            stock = await asyncio.to_thread(yf.Ticker, ticker)
             return await asyncio.to_thread(lambda: stock.info)
         except Exception as e:
             logging.error(f"Failed to fetch full info for {ticker}: {e}")
