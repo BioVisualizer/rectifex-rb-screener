@@ -16,9 +16,6 @@ from typing import List, Dict, Callable, Optional
 # Assuming config.py is in the same directory
 import config
 
-# Define the base directory of the project to reliably locate data files
-BASE_DIR = Path(__file__).resolve().parent
-
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -59,7 +56,7 @@ def _get_tickers_from_csv(index_details: dict) -> list[str]:
     Loads a list of tickers from a fallback CSV file using an absolute path.
     """
     # Construct an absolute path to the CSV file
-    fallback_path = BASE_DIR / index_details['fallback_csv']
+    fallback_path = config.BASE_DIR / index_details['fallback_csv']
     if not fallback_path.exists():
         logging.warning(f"Fallback CSV not found at {fallback_path}")
         return []
@@ -124,7 +121,7 @@ def get_master_ticker_list() -> list[str] | None:
     """
     Loads tickers from the master CSV file if it exists, using an absolute path.
     """
-    master_list_path = BASE_DIR / "data" / "master_tickers.csv"
+    master_list_path = config.BASE_DIR / "data" / "master_tickers.csv"
     if not master_list_path.exists():
         logging.warning(f"Master ticker list not found at {master_list_path}")
         return None
