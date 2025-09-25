@@ -1,68 +1,56 @@
-# Rectifex RB - Global Rebound Stock Screener
+# Rectifex RB - Global Rebound Stock Screener v2.0
 
-This project is a Python desktop application designed to screen global stocks to identify potential long-rebound candidates. It serves as a filter to generate a manageable list of stocks for deeper manual analysis.
+This project is a Python desktop application designed to screen global stocks to identify potential investment candidates based on a variety of technical and fundamental scenarios. It serves as a powerful filter to generate a manageable list of stocks for deeper manual analysis.
 
-The application is built with Python and PyQt6, and it is designed to be packaged as a Flatpak for Kubuntu and other Linux distributions.
+The application is built with Python and PyQt6, and it is designed to be packaged as a Flatpak for Linux distributions.
 
-## Features
+![App Screenshot](placeholder.png) <!-- I will need to add a real screenshot path later if available -->
 
-*   **Global Stock Scanning**: Scans major indices like the S&P 500, Nasdaq 100, DAX, STOXX Europe 600, and Nikkei 225.
-*   **Data Caching**: Caches downloaded stock data to speed up subsequent scans and reduce API calls.
-*   **Advanced Filtering**: Applies a multi-stage filtering process:
-    1.  **Market Context Filter**: Ensures the broader market is in an uptrend before searching for long candidates.
-    2.  **Liquidity Filter**: Filters for stocks with sufficient market capitalization and trading volume.
-    3.  **Core Signal Filter**: Identifies stocks that are oversold (based on RSI) and near key technical support levels (200-day SMA, 90-day low).
-*   **Scoring System**: Ranks qualified candidates with a "Rebound Score" from 0-100.
-*   **Interactive GUI**: A responsive user interface built with PyQt6 that runs the analysis in a background thread. Features include:
-    *   Sortable results table.
-    *   Pop-up chart window for visual analysis of any candidate.
+## Key Features
+
+*   **Modern User Interface**: A responsive, three-pane interface allows for intuitive workflow:
+    *   **Strategy Pane**: Select your desired scan from categorized cards.
+    *   **Main Content Pane**: View onboarding instructions, detailed scan results, or an empty state message.
+    *   **Contextual Pane**: Instantly see details about the selected scan strategy or a summary of a selected stock, including a mini-chart and company bio.
+*   **Diverse Scanning Scenarios**: Choose from over 10 unique scanning strategies, now grouped by trading concept: Contrarian, Trend-Following, Value, and Volatility. Includes the new **Floor Consolidation** scan to find stocks bottoming out after a crash.
+*   **Advanced Charting**: The pop-up chart window provides deep analysis tools:
+    *   Candlestick chart with 50/200-day moving averages.
+    *   **Fibonacci Retracement** levels calculated for the visible chart period.
+    *   **MACD** and **RSI** indicator panels.
+    *   Scenario-specific visualizations, such as marking the crash and consolidation phases for the Floor Consolidation scan.
+*   **Customizable Scans**:
+    *   **Advanced Settings**: Fine-tune global filters like minimum market cap and average volume. Adjust specific parameters for complex scans like Floor Consolidation.
+    *   **Ticker Manager**: Manage your own custom ticker lists (watchlists) directly within the application.
+    *   **Single Ticker Analysis**: Run any scan on a single stock for quick analysis.
+*   **Data Caching**: Caches downloaded stock data to speed up subsequent scans and reduce API calls. The cache can be cleared from the Advanced Settings menu.
+*   **Rich Results Table**:
+    *   Sortable and filterable results.
+    *   Detailed tooltips with score breakdowns.
     *   Export results to CSV or Excel (XLSX).
 
 ## Scanning Scenarios
 
-The application uses eight different scenarios to find potential candidates, each suited to a different trading style and concept.
+The application uses a categorized library of scenarios to find potential candidates, each suited to a different trading style.
 
-### Classic Oversold
--   **Concept:** A contrarian, mean-reversion strategy. It operates on the idea that a stock's price, after a sharp decline, will likely bounce back (revert) to its long-term average. The scan identifies stocks that are technically "oversold" (indicated by a low Relative Strength Index - RSI) and are approaching a significant historical support level (like the 200-day moving average).
--   **Suitability:** Best for short- to medium-term traders who are comfortable with contrarian plays and believe the market has overreacted to negative news. It aims to identify potential bottoming-out points.
--   **Limitations:** This strategy can be risky and is sometimes referred to as "catching a falling knife." A stock can remain oversold for an extended period, and support levels can break, leading to further declines. It is most effective when confirmed by other indicators or a bullish market context.
+### Contrarian & Reversion (Find stocks moving against the trend)
+*   **Classic Oversold**: Identifies stocks that are technically "oversold" (low RSI) and approaching significant support levels (e.g., 200-day SMA). Best for short- to medium-term mean-reversion traders.
+*   **Floor Consolidation - Universal**: A powerful new scan that finds stocks that have entered a stable, low-volume consolidation phase after a significant price crash, indicating a potential bottom.
+*   **Floor Consolidation - Quality**: A variant of the Universal scan that adds strict filters for fundamental strength (high Fundamental Score) and a prior long-term uptrend, aiming to find high-quality companies that are showing signs of stabilization.
+*   **Mean Reversion (Bollinger Bands)**: A short-term strategy that identifies statistically oversold conditions when a stock's price touches or closes below its lower Bollinger Band.
 
-### Quality Stock Pullback
--   **Concept:** A trend-following strategy, often summarized as "buying the dip." It looks for fundamentally strong companies that are in a confirmed long-term uptrend and have experienced a temporary, minor price drop, bringing them closer to a short-term support level like the 50-day moving average.
--   **Suitability:** Ideal for traders who prefer to follow the trend rather than bet against it. It offers a chance to enter a strong, upward-moving stock at a more reasonable price point (GARP - Growth at a Reasonable Price).
--   **Limitations:** A minor pullback can sometimes be the beginning of a major trend reversal. The 50-day moving average is not a guaranteed support level. The fundamental metrics are based on past performance and do not guarantee future results.
+### Trend & Momentum (Find stocks with strong price momentum)
+*   **Momentum Breakout**: A classic momentum strategy that identifies stocks breaking out to new 52-week highs on a surge in trading volume.
+*   **Golden Cross**: A long-term trend-following signal that occurs when the 50-day moving average crosses above the 200-day moving average, signaling a potential major uptrend.
 
-### Fundamental Divergence
--   **Concept:** A value-oriented, contrarian strategy that seeks to find a mismatch between a company's strong financial health and its recent lackluster stock performance. The scan looks for companies with solid fundamentals (e.g., good growth, low debt) whose stock price has been stagnating or underperforming the market.
--   **Suitability:** Best for patient, long-term investors who conduct their own fundamental analysis. It can help uncover potentially undervalued "hidden gems" before they are discovered by the broader market.
--   **Limitations:** The market can ignore an "undervalued" stock for a long time, leading to a "value trap." There may be valid reasons for the poor stock performance that are not captured by the screener's fundamental metrics.
+### Value & Fundamental (Find quality companies at a fair price)
+*   **Quality Stock Pullback**: "Buys the dip" on fundamentally strong companies in a long-term uptrend that have experienced a minor pullback to a short-term support level like the 50-day moving average.
+*   **Fundamental Divergence**: A value-oriented strategy that finds companies with solid fundamentals whose stock price has been stagnating or underperforming the market.
+*   **High-Quality Dividend**: Focuses not just on high dividend yield, but on the *sustainability* of that dividend by filtering for companies with healthy financials (e.g., reasonable payout ratio, low debt).
 
-### Momentum Breakout
--   **Concept:** A classic momentum strategy based on the principle that "winners keep winning." It identifies stocks that are breaking out to new 52-week highs, especially when accompanied by a surge in trading volume. This suggests strong buying interest and the potential for continued upward movement.
--   **Suitability:** For active traders who want to ride strong, established trends. It focuses on stocks that are already demonstrating significant positive momentum.
--   **Limitations:** This strategy carries the risk of buying at the peak (a "false breakout"). A stock can quickly reverse after hitting a new high. It requires disciplined risk management, such as using tight stop-losses.
+### Volatility (Find stocks poised for a big move)
+*   **Volatility Squeeze**: Identifies stocks where price volatility has contracted to an unusually low level (narrow Bollinger Bands), which often precedes a significant price breakout (in either direction).
 
-### Golden Cross
--   **Concept:** A long-term trend-following signal. A Golden Cross occurs when a shorter-term moving average (typically the 50-day) crosses above a longer-term moving average (typically the 200-day). It is widely regarded as a signal of a potential major, long-term uptrend.
--   **Suitability:** For long-term investors and position traders who are looking to identify major shifts in a stock's primary trend. It can be used to confirm the start of a new bull phase for a stock.
--   **Limitations:** This is a lagging indicator, meaning a significant portion of the price move may have already occurred by the time the signal appears. It can also generate false signals in choppy, sideways markets where the moving averages cross back and forth frequently.
-
-### Mean Reversion (Bollinger Bands)
--   **Concept:** A short-term, mean-reversion strategy that uses Bollinger Bands to identify statistically oversold conditions. When a stock's price touches or closes below its lower Bollinger Band, it is considered to be far from its recent average price and may be due for a bounce.
--   **Suitability:** For short-term "swing" traders looking for quick rebound opportunities. It provides clear, statistically-defined entry points for bounce plays.
--   **Limitations:** In a strong, sustained downtrend, a stock can "walk the band" by continuously trading at or near the lower band without reverting to the mean. This signal is purely technical and ignores all fundamental factors.
-
-### Volatility Squeeze
--   **Concept:** A pre-breakout or volatility-based strategy. It identifies stocks where price volatility has contracted to an unusually low level (i.e., the Bollinger Bands have narrowed significantly). This "squeeze" often precedes a period of high volatility—a significant price move or breakout.
--   **Suitability:** For traders who want to position themselves *before* a major price move occurs. It allows for setting up trades with well-defined risk (e.g., placing stops outside the narrow consolidation range).
--   **Limitations:** The scan does not predict the *direction* of the breakout, which could be up or down. A stock can also remain in a low-volatility state for a longer-than-expected period. It requires a plan for how to trade the eventual breakout in either direction.
-
-### High-Quality Dividend
--   **Concept:** A value and income-investing strategy. It focuses not just on a high dividend yield, but on the *sustainability* of that dividend. It filters for companies with healthy financials (e.g., a reasonable payout ratio, low debt) to avoid "yield traps"—stocks with high but risky dividends that are likely to be cut.
--   **Suitability:** For long-term, income-oriented investors who prioritize receiving a steady stream of cash flow from their investments over short-term capital appreciation.
--   **Limitations:** A history of stable dividends does not guarantee future payments, as they can be cut at any time. The strategy is less focused on growth and may underperform in strong bull markets where growth stocks are favored.
-
-## Installation and Usage (from Source)
+## Installation and Usage
 
 These instructions explain how to build and install the application on a Debian-based system like Kubuntu using the provided Flatpak manifest.
 
@@ -75,110 +63,63 @@ sudo apt install flatpak flatpak-builder
 ```
 
 ### 2. Add Flathub Remote
-Flathub is the main repository for Flatpak applications and runtimes. You need to add it to download the KDE SDK, which is required for the build.
+If you don't have it already, add the Flathub repository to download the necessary KDE SDK for the build.
 
 ```bash
 flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 ```
 
-### 3. Clone the Repository
-Download the source code from GitHub using the following command.
-
-```bash
-git clone https://github.com/BioVisualizer/rectifex-rb-screener.git
-cd rectifex-rb-screener
-```
-
-### 4. Build and Install the Application
-From the project's root directory (where `flathub.json` is located), run the following command:
+### 3. Build and Install the Application
+From the project's root directory (where `flathub.json` is located), run the build command:
 
 ```bash
 flatpak-builder build-dir flathub.json --user --install --force-clean
 ```
-*   `build-dir`: A temporary directory where the build will take place.
-*   `--user`: Installs the application for the current user.
-*   `--install`: Installs the application after a successful build.
-*   `--force-clean`: Deletes the build directory after completion to save space.
 
-### 5. Run the Application
-After the installation is complete, you can find "Rectifex RB" in your application menu (e.g., the Kicker in Kubuntu).
-
-Alternatively, you can run it from the command line:
+### 4. Run the Application
+After installation, find "Rectifex RB" in your application menu or run it from the command line:
 ```bash
 flatpak run com.rectifex.GlobalReboundScreener
 ```
 
-## How to Extend the Stock Universe
+## How to Manage Tickers
 
-The application's stock universe is determined by the ticker lists it loads on startup. While it attempts to scrape the latest lists from Wikipedia for US and German indices, the most reliable way to manage and expand the lists for European and Japanese markets is by editing the local CSV files.
+The application scans major world indices by default. You can add your own custom stock lists (watchlists) using the built-in **Ticker Manager**.
 
-The fallback data files are located in the `data/` directory:
+1.  Click the **"Manage Watchlists"** button in the top toolbar.
+2.  In the dialog, you can create new lists (e.g., "My Tech Stocks") or edit existing ones.
+3.  Add ticker symbols to your lists, one per line.
+4.  These lists will appear in the "Index" selection dropdown for you to scan.
 
-*   `data/sp500_tickers.csv`
-*   `data/nasdaq100_tickers.csv`
-*   `data/dax_tickers.csv`
-*   `data/stoxx600_tickers.csv`
-*   `data/nikkei225_tickers.csv`
+**Important:** Tickers must be in a format that `yfinance` can understand (e.g., `AAPL`, `MSFT`, `6758.T` for a stock on the Tokyo exchange, `SAP.DE` for a stock on XETRA).
 
-To expand the number of scanned tickers, particularly for the STOXX 600 and Nikkei 225, simply open the corresponding CSV file and add new ticker symbols, one per line.
+## Explanation of Scan Results
 
-**Important:** The tickers must be in a format that `yfinance` can understand.
-*   For most exchanges, this is the standard ticker symbol.
-*   For German stocks (XETRA), add the suffix `.DE` (e.g., `SAP.DE`).
-*   For Japanese stocks (Tokyo Stock Exchange), add the suffix `.T` (e.g., `6758.T`).
-*   For other European exchanges, the suffix varies (e.g., `.PA` for Paris, `.L` for London, `.MI` for Milan).
+The results table contains several columns with technical terms and scores.
 
-By manually curating these lists, you have full control over the stock universe the application analyzes.
+### Core Information
+*   **Ticker**: The unique symbol for a stock.
+*   **Name**: The company's name.
+*   **Price**: The most recent closing price.
+
+### The Scoring System
+*   **Rebound Score (0-100)**: The final, weighted average score indicating the overall quality of a setup, combining the Technical, Fundamental, and Market Context scores.
+*   **Tech. Score (0-100)**: Evaluates the strength of the technical chart pattern based on the selected scan scenario.
+*   **Floor Score (0-100)**: A specialized technical score used *only* for the **Floor Consolidation** scans. It measures the quality of the bottoming pattern based on crash depth, consolidation tightness, and volume reduction.
+*   **Fund. Score (0-100)**: Measures a company's financial health compared to its sector peers. A score of 50 is average; higher is better.
+*   **Market Score (0-100)**: A simple gauge of the broader market trend (100 for Bullish, 20 for Bearish).
+
+### Key Metrics
+*   **For Floor Consolidation Scans**:
+    *   **Crash %**: The percentage drop from the recent peak to the subsequent low.
+    *   **Consol. Range %**: The tightness of the price range during the consolidation phase. Lower is better.
+    *   **Drop Date**: The date the stock hit its low after the crash.
+*   **For Fundamental Scans**:
+    *   **ROE (Return on Equity)**, **P/E Ratio**, **Debt/Equity**, **Revenue Growth**, **EPS Growth**, etc. These metrics are used to calculate the **Fund. Score**.
 
 ## Disclaimer
 
-This application is intended for informational and educational purposes only. The data and analysis provided should not be considered as financial advice. Investing in stocks involves risk, including the possible loss of principal.
-
-The screening results are based on technical indicators and historical data, which are not guarantees of future performance. You should always conduct your own thorough research and consult with a qualified financial advisor before making any investment decisions. The author and contributors are not responsible for any investment losses you may incur.
-
-## Explanation of Scan Results (Scores and Metrics)
-
-The results table contains several columns with technical terms and scores. Here is a detailed explanation of what they mean and how they are calculated.
-
-### Core Information
-*   **Ticker**: The unique symbol for a stock on its exchange (e.g., `AAPL` for Apple).
-*   **Name**: The company's name.
-*   **Price**: The most recent closing price.
-*   **Change %**: The percentage price change over the last trading day. *(Note: This is currently a placeholder value).*
-*   **Sparkline**: A mini-chart showing the price trend over the last 30 days.
-
-### The Scoring System
-
-The application uses a multi-layered scoring system to rank candidates. The final **Rebound Score** is a composite of three sub-scores: Technical, Fundamental, and Market Context.
-
-*   **Rebound Score (0-100)**: This is the final, weighted average score that indicates the overall quality of a setup. A higher score is better. It is calculated with the following default weights:
-    *   `Technical Score: 55%`
-    *   `Fundamental Score: 30%`
-    *   `Market Context Score: 15%`
-
-*   **Tech. Score (0-100)**: This score evaluates the strength of the technical chart pattern. **Its calculation is entirely dependent on the selected scan scenario.** For example:
-    *   In a **Classic Oversold** scan, it's a blend of how "oversold" the RSI is and how close the price is to a major support level (200-day average or 90-day low).
-    *   In a **Momentum Breakout** scan, it's based on the volume surge and the strength of the price breakout above the 52-week high.
-    *   Each scenario has its own unique logic for this score.
-
-*   **Fund. Score (0-100)**: This score measures a company's financial health. A company's key metrics are compared to the median values of other companies in the same sector. A score of 50 means the company is average for its sector; a score above 50 is above average. The score is calculated from the metrics listed below.
-
-*   **Market Score (0-100)**: This score assesses the health of the broader market (e.g., the S&P 500 for US stocks). It is a simple gauge:
-    *   **100 (Bullish)**: The index is trading above its 50-day moving average.
-    *   **20 (Bearish)**: The index is trading below its 50-day moving average.
-    *   **50 (Neutral)**: The market data could not be retrieved.
-
-### Key Fundamental Metrics
-
-These are some of the key financial ratios used to calculate the **Fund. Score**. The screener automatically judges whether a higher or lower value is better (e.g., high growth is good, high debt is bad).
-
-*   **ROE (Return on Equity)**: A measure of profitability. It shows how effectively a company uses shareholder investments to generate profit. A higher ROE is generally better.
-*   **P/E Ratio (PE_TTM)**: The Price-to-Earnings ratio compares the company's stock price to its earnings per share over the trailing twelve months (TTM). A lower P/E can indicate a stock is "cheaper" or undervalued.
-*   **Debt/Equity Ratio**: Measures a company's financial leverage by dividing its total debt by its shareholder equity. A high ratio indicates high debt, which can be a risk.
-*   **Revenue Growth (3Y CAGR)**: The Compound Annual Growth Rate of a company's revenue over the last three years. It shows the company's ability to increase its sales over time.
-*   **EPS Growth (1Y)**: The growth in a company's Earnings Per Share over the last year. Strong EPS growth is a positive sign of increasing profitability.
-*   **Free Cash Flow Yield**: This metric compares the free cash flow a company generates to its market value. A higher yield can suggest a company is undervalued and has strong cash generation.
-*   **Payout Ratio**: Used in the "High-Quality Dividend" scan, this shows the percentage of a company's earnings that it pays out to shareholders as dividends. A very high ratio (e.g., >80%) can be a warning sign that the dividend is unsustainable.
+This application is for informational and educational purposes only. It is not financial advice. Investing in stocks involves risk. Always conduct your own thorough research and consult with a qualified financial advisor before making any investment decisions.
 
 ## License
 
