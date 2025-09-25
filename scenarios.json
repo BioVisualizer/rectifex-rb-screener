@@ -124,6 +124,8 @@
     "group": "Value & Fundamental",
     "name": "GARP with Trend Filter",
     "description": "Finds growth stocks at a reasonable price that are in a positive short-term trend.",
+    "what_it_is": "This scan implements the 'Growth at a Reasonable Price' (GARP) strategy. It looks for companies with solid earnings growth but avoids those with excessively high P/E ratios. It adds a trend filter, requiring the stock to be trading above its 50-day moving average.",
+    "best_for": "Investors who want a balance of growth and value, and prefer to invest in companies that are already showing positive price momentum.",
     "params": {"required_info": ["earningsGrowth", "trailingPE"], "min_history": 50},
     "class": "GarpTrendScenario"
   },
@@ -132,6 +134,8 @@
     "group": "Trend & Momentum",
     "name": "Volume-Confirmed Breakout",
     "description": "Identifies stocks breaking out to new highs on a surge of volume.",
+    "what_it_is": "A classic momentum strategy. This scan looks for stocks hitting a new 52-week high, but only considers it a valid signal if the breakout occurs on trading volume that is significantly higher than its recent average.",
+    "best_for": "Momentum traders who look for strong confirmation signals before entering a trade. The high volume suggests institutional participation.",
     "params": {"min_history": 252},
     "class": "VolumeBreakoutScenario"
   },
@@ -140,6 +144,8 @@
     "group": "Contrarian & Reversion",
     "name": "Stochastic Oversold",
     "description": "Finds oversold stocks where momentum may be reversing.",
+    "what_it_is": "This scan uses the Stochastic Oscillator to find stocks that are in 'oversold' territory (Stochastic < 20). It specifically looks for a bullish crossover, where the %K line crosses above the %D line, suggesting that short-term momentum is turning positive.",
+    "best_for": "Short-term swing traders who use technical indicators to time entry points for potential bounces.",
     "params": {"min_history": 20},
     "class": "StochasticOversoldScenario"
   }
