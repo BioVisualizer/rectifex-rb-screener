@@ -28,6 +28,7 @@ from scoring import (
     DEFAULT_REBOUND_SCORE_WEIGHTS,
     compute_floor_score,
 )
+from settings_manager import settings
 
 # --- Indicator Functions ---
 
@@ -64,11 +65,40 @@ def calculate_macd(data: pd.Series, fast_period=12, slow_period=26, signal_perio
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def get_ticker_info_cached(ticker: str) -> dict | None:
-    # ... (Implementation remains)
-    return None
+    """
+    Retrieves full ticker info from yfinance.
+    NOTE: This is a simplified, blocking version.
+    A full implementation would use async and caching.
+    """
+    try:
+        return yf.Ticker(ticker).info
+    except Exception as e:
+        logging.warning(f"Could not fetch info for {ticker}: {e}")
+        return None
+
 
 def passes_liquidity_filter(ticker_info: dict) -> bool:
-    # ... (Implementation remains)
+    """
+    Checks if a stock passes basic liquidity and size filters.
+    """
+    if not ticker_info:
+        return False
+
+    min_market_cap = settings.get('min_market_cap')
+    min_avg_volume = settings.get('min_avg_volume_30d')
+
+    market_cap = ticker_info.get('marketCap')
+    avg_volume = ticker_info.get('averageVolume') # 3-month average volume
+
+    if not market_cap or not avg_volume:
+        return False # Not enough data
+
+    if market_cap < min_market_cap:
+        return False
+
+    if avg_volume < min_avg_volume:
+        return False
+
     return True
 
 class BaseScenario(ABC):
