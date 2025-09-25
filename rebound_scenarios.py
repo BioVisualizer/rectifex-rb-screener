@@ -138,9 +138,9 @@ class ScenarioRunner:
 
     def _get_scenario_instance(self, scenario_id: str) -> Optional[BaseScenario]:
         scenario_config = next((s for s in self.scenarios_config if s['id'] == scenario_id), None)
-        if not scenario_config: self.progress_callback(f"Error: Scenario with ID '{scenario_id}' not found."); return None
+        if not scenario_config: self.progress_callback.emit(f"Error: Scenario with ID '{scenario_id}' not found."); return None
         class_name = scenario_config.get("class"); ScenarioClass = self.SCENARIO_CLASS_MAP.get(class_name)
-        if not ScenarioClass: self.progress_callback(f"Error: Scenario class '{class_name}' not implemented."); return None
+        if not ScenarioClass: self.progress_callback.emit(f"Error: Scenario class '{class_name}' not implemented."); return None
         return ScenarioClass(name=scenario_config['name'], progress_callback=self.progress_callback, is_cancelled_callback=self.is_cancelled)
 
     async def run_scan(self, scenario_id: str, ticker: str = None) -> List[ReboundCandidate]:
