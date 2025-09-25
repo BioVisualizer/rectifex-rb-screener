@@ -7,4 +7,3 @@ openpyxl
 matplotlib
 mplfinance
 aiohttp
-pandas-ta==0.3.14b
