@@ -51,7 +51,15 @@ def calculate_stochastic(high: pd.Series, low: pd.Series, close: pd.Series, k: i
     stoch_d = stoch_k.rolling(window=d).mean()
     return stoch_k, stoch_d
 
-# ... (other indicator functions like bollinger bands, macd)
+def calculate_macd(data: pd.Series, fast_period=12, slow_period=26, signal_period=9) -> tuple[pd.Series, pd.Series, pd.Series]:
+    if data is None or len(data) < slow_period:
+        return pd.Series(dtype=np.float64), pd.Series(dtype=np.float64), pd.Series(dtype=np.float64)
+    ema_fast = data.ewm(span=fast_period, adjust=False).mean()
+    ema_slow = data.ewm(span=slow_period, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
+    macd_hist = macd_line - signal_line
+    return macd_line, signal_line, macd_hist
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
