@@ -261,10 +261,17 @@ class ScenarioRunner:
     def __init__(self, progress_callback: Callable = None, progress_percent_callback: Callable = None, is_cancelled_callback: Callable = None):
         self.progress_callback = progress_callback
         self.progress_percent_callback = progress_percent_callback
-        self.is_cancelled = is_cancelled_callback or (lambda: False)
+        self._is_cancelled_cb = is_cancelled_callback or (lambda: False)
+        self._is_cancelled = False
         self.scenarios_config = self.load_scenarios_config()
         self.fundamental_handler = FundamentalDataHandler()
         self.telemetry = {"scan_duration_seconds": 0, "total_tickers_in_universe": 0, "tickers_processed": 0, "tickers_skipped": {"total": 0, "missing_fundamentals": 0, "insufficient_history": 0, "liquidity": 0, "other": 0}}
+
+    def is_cancelled(self):
+        return self._is_cancelled or self._is_cancelled_cb()
+
+    def cancel(self):
+        self._is_cancelled = True
 
     def _get_scenario_instance(self, scenario_id: str) -> Optional[BaseScenario]:
         scenario_config = next((s for s in self.scenarios_config if s['id'] == scenario_id), None)
@@ -298,7 +305,7 @@ class ScenarioRunner:
             if self.is_cancelled(): break
 
             if self.progress_percent_callback:
-                self.progress_percent_callback(int((i + 1) / total_tickers * 100))
+                self.progress_percent_callback.emit(int((i + 1) / total_tickers * 100))
 
             self.telemetry['tickers_processed'] += 1
 
