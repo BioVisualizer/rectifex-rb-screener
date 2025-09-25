@@ -188,7 +188,7 @@ async def get_historical_data_for_tickers(
                     logging.warning(f"Cache read failed for {ticker}: {e}")
         tickers_to_fetch.append(ticker)
 
-    if progress_callback: progress_callback(f"Loaded {cache_hits}/{len(tickers)} historical records from cache.")
+    if progress_callback: progress_callback.emit(f"Loaded {cache_hits}/{len(tickers)} historical records from cache.")
     if not tickers_to_fetch or is_cancelled(): return results
 
     semaphore = asyncio.Semaphore(8)
@@ -213,7 +213,7 @@ async def get_historical_data_for_tickers(
             ticker, data = await future
             if data is not None: results[ticker] = data
             fetched_count += 1
-            if progress_callback: progress_callback(f"Fetched historical data for {ticker} ({fetched_count}/{len(tickers_to_fetch)})")
+            if progress_callback: progress_callback.emit(f"Fetched historical data for {ticker} ({fetched_count}/{len(tickers_to_fetch)})")
         except asyncio.CancelledError: pass
     return results
 
