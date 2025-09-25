@@ -76,7 +76,23 @@ class BaseScenario(ABC):
         self._name = name
         self.progress_callback = progress_callback
         self.is_cancelled = is_cancelled_callback
-    # ... (Implementation remains)
+
+    def _get_fundamentals_for_candidate(self, fundamental_data: Dict, stock_info: Dict) -> Dict:
+        if not fundamental_data:
+            return {'name': stock_info.get('shortName', 'N/A')}
+        metrics = fundamental_data.get('metrics', {})
+        return {
+            'name': stock_info.get('shortName', 'N/A'),
+            'sector': stock_info.get('sector', 'N/A'),
+            'trailingPE': metrics.get('pe_ttm'),
+            'earningsGrowth': metrics.get('eps_1y_growth'),
+            'revenueGrowth': metrics.get('revenue_3yr_cagr'),
+            'roe': metrics.get('roe'),
+        }
+
+    @abstractmethod
+    def run(self, stock_data: pd.DataFrame, fundamental_data: Dict, stock_info: Dict) -> Optional[ReboundCandidate]:
+        pass
 
 class GarpTrendScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, fundamental_data: Dict, stock_info: Dict) -> Optional[ReboundCandidate]:

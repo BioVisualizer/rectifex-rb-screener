@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Callable, Optional
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from curl_cffi.requests import AsyncSession
 
 import config
 
@@ -21,6 +22,7 @@ SECTOR_MEDIANS_FILE = CACHE_DIR / "sector_medians.json"
 class FundamentalDataHandler:
     def __init__(self):
         FUNDAMENTALS_DIR.mkdir(parents=True, exist_ok=True)
+        self.session = AsyncSession(impersonate="chrome110")
 
     def _get_cached_data(self, ticker: str) -> Optional[Dict[str, Any]]:
         cache_file = FUNDAMENTALS_DIR / f"{ticker}.json"
@@ -69,7 +71,7 @@ class FundamentalDataHandler:
         base_wait_time = 2
         for attempt in range(max_retries):
             try:
-                stock = await asyncio.to_thread(yf.Ticker, ticker)
+                stock = await asyncio.to_thread(yf.Ticker, ticker, session=self.session)
                 metrics = await asyncio.to_thread(self._calculate_metrics, stock)
                 if not metrics: return None
                 data_packet = {
@@ -93,6 +95,7 @@ class FundamentalDataHandler:
         is_cancelled = is_cancelled_callback or (lambda: False)
         results, tickers_to_fetch = {}, []
         for ticker in tickers:
+            if is_cancelled(): break
             cached_data = self._get_cached_data(ticker)
             if cached_data: results[ticker] = cached_data
             else: tickers_to_fetch.append(ticker)
@@ -112,7 +115,7 @@ class FundamentalDataHandler:
             try:
                 ticker, data = await future
                 if data: results[ticker] = data
-                if progress_callback: progress_callback(f"Fetched fundamentals for {ticker}")
+                if progress_callback: progress_callback.emit(f"Fetched fundamentals for {ticker}")
             except asyncio.CancelledError: pass
         return results
 
@@ -121,5 +124,9 @@ class FundamentalDataHandler:
         pass
 
     async def get_full_ticker_info(self, ticker: str) -> Optional[Dict[str, Any]]:
-        # ... (Implementation remains the same)
-        pass
+        try:
+            stock = await asyncio.to_thread(yf.Ticker, ticker, session=self.session)
+            return await asyncio.to_thread(lambda: stock.info)
+        except Exception as e:
+            logging.error(f"Failed to fetch full info for {ticker}: {e}")
+            return None

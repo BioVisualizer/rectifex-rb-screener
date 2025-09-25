@@ -7,3 +7,4 @@ openpyxl
 matplotlib
 mplfinance
 aiohttp
+curl-cffi
