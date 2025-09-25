@@ -55,9 +55,11 @@ class AnalysisWorker(QObject):
         self.runner = None # Initialize runner attribute
 
     def cancel(self):
-        """Sets the cancellation flag to True."""
+        """Sets the cancellation flag to True and calls the runner's cancel."""
         logging.info("Cancellation requested for worker.")
         self._is_cancelled = True
+        if self.runner:
+            self.runner.cancel()
 
 
     def run(self):
