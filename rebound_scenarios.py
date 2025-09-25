@@ -10,11 +10,13 @@ import re
 from datetime import datetime, timedelta
 import yfinance as yf
 from abc import ABC, abstractmethod
+import pandas_ta as ta
+import time
 
 # App-specific imports
 import config
 import data_loader
-from data_structures import ReboundCandidate
+from data_structures import ReboundCandidate, safe_get
 from fundamentals import FundamentalDataHandler, FUNDAMENTALS_DIR, SECTOR_MEDIANS_FILE
 from scoring import (
     compute_fundamental_score,
@@ -29,44 +31,41 @@ from scoring import (
 )
 
 # --- Indicator Functions ---
+# Using pandas_ta for standardized calculations, falling back to manual if needed.
 
 def calculate_sma(data: pd.Series, window: int) -> pd.Series:
-    """Calculates the Simple Moving Average."""
+    """Calculates the Simple Moving Average using pandas_ta."""
     if data is None or len(data) < window:
         return pd.Series(dtype=np.float64)
-    return data.rolling(window=window).mean()
+    return ta.sma(data, length=window)
 
 def calculate_rsi(data: pd.Series, window: int = 14) -> pd.Series:
-    """Calculates the Relative Strength Index (RSI)."""
+    """Calculates the Relative Strength Index (RSI) using pandas_ta."""
     if data is None or len(data) < window:
         return pd.Series(dtype=np.float64)
-    delta = data.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    return ta.rsi(data, length=window)
 
 def calculate_bollinger_bands(data: pd.Series, window: int = 20, num_std_dev: int = 2) -> tuple[pd.Series, pd.Series, pd.Series]:
-    """Calculates the Bollinger Bands."""
+    """Calculates Bollinger Bands using pandas_ta."""
     if data is None or len(data) < window:
         return pd.Series(dtype=np.float64), pd.Series(dtype=np.float64), pd.Series(dtype=np.float64)
-    middle_band = calculate_sma(data, window)
-    std_dev = data.rolling(window=window).std()
-    upper_band = middle_band + (std_dev * num_std_dev)
-    lower_band = middle_band - (std_dev * num_std_dev)
-    return upper_band, middle_band, lower_band
+    bbands = ta.bbands(data, length=window, std=num_std_dev)
+    return bbands[f'BBU_{window}_{num_std_dev}.0'], bbands[f'BBM_{window}_{num_std_dev}.0'], bbands[f'BBL_{window}_{num_std_dev}.0']
 
 def calculate_macd(data: pd.Series, fast_period: int = 12, slow_period: int = 26, signal_period: int = 9) -> tuple[pd.Series, pd.Series, pd.Series]:
-    """Calculates the Moving Average Convergence Divergence (MACD)."""
+    """Calculates MACD using pandas_ta."""
     if data is None or len(data) < slow_period:
         return pd.Series(dtype=np.float64), pd.Series(dtype=np.float64), pd.Series(dtype=np.float64)
-    fast_ema = data.ewm(span=fast_period, adjust=False).mean()
-    slow_ema = data.ewm(span=slow_period, adjust=False).mean()
-    macd_line = fast_ema - slow_ema
-    signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
-    histogram = macd_line - signal_line
-    return macd_line, signal_line, histogram
+    macd = ta.macd(data, fast=fast_period, slow=slow_period, signal=signal_period)
+    return macd[f'MACD_{fast_period}_{slow_period}_{signal_period}'], macd[f'MACDs_{fast_period}_{slow_period}_{signal_period}'], macd[f'MACDh_{fast_period}_{slow_period}_{signal_period}']
+
+def calculate_stochastic(high: pd.Series, low: pd.Series, close: pd.Series, k: int = 14, d: int = 3) -> tuple[pd.Series, pd.Series]:
+    """Calculates Stochastic Oscillator using pandas_ta."""
+    if close is None or len(close) < k:
+        return pd.Series(dtype=np.float64), pd.Series(dtype=np.float64)
+    stoch = ta.stoch(high, low, close, k=k, d=d)
+    return stoch[f'STOCHk_{k}_{d}_3'], stoch[f'STOCHd_{k}_{d}_3']
+
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -77,7 +76,7 @@ def get_ticker_info_cached(ticker: str) -> dict | None:
     cache_file = info_cache_dir / f"{ticker}.json"
     if cache_file.exists():
         mod_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
-        if datetime.now() - mod_time < timedelta(hours=config.CACHE_EXPIRY_HOURS):
+        if datetime.now() - mod_time < timedelta(hours=config.HISTORICAL_CACHE_EXPIRY_HOURS):
             try:
                 with open(cache_file, 'r') as f: return json.load(f)
             except Exception: pass
@@ -130,6 +129,157 @@ class BaseScenario(ABC):
         """The main execution method for the scenario."""
         pass
 
+class GarpTrendScenario(BaseScenario):
+    """Implements the 'GARP with Trend Filter' scan."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def run(self, stock_data: pd.DataFrame, fundamental_data: Dict, stock_info: Dict) -> Optional[ReboundCandidate]:
+        # Pre-flight checks are now handled by the runner.
+        # We can assume data is present and valid.
+
+        earnings_growth = safe_get(stock_info, 'earningsGrowth')
+        pe_ratio = safe_get(stock_info, 'trailingPE')
+
+        # Apply filters
+        passes_filter = (
+            earnings_growth > 0.10 and
+            0 < pe_ratio < 25
+        )
+        if not passes_filter:
+            return None
+
+        # Calculate trend filter
+        stock_data['SMA50'] = calculate_sma(stock_data['Close'], 50)
+        latest_price = stock_data['Close'].iloc[-1]
+        sma50 = stock_data['SMA50'].iloc[-1]
+
+        if pd.isna(latest_price) or pd.isna(sma50):
+            return None
+
+        if latest_price <= sma50:
+            return None
+
+        # Create candidate if all filters pass
+        self._emit_progress(f"!!! {stock_info['ticker']} is a potential '{self.name}' candidate.")
+
+        technicals_dict = {
+            'price': round(latest_price, 2),
+            'sma50': round(sma50, 2),
+        }
+        fundamentals_dict = self._get_fundamentals_for_candidate(fundamental_data, stock_info)
+        fundamentals_dict['earningsGrowth'] = earnings_growth
+        fundamentals_dict['trailingPE'] = pe_ratio
+
+        technical_score = 100
+
+        return ReboundCandidate(
+            ticker=stock_info['ticker'],
+            scenario=self.name,
+            rebound_score=0,
+            technical_score=technical_score,
+            fundamentals=fundamentals_dict,
+            history_df=stock_data,
+            technicals=technicals_dict
+        )
+
+class VolumeBreakoutScenario(BaseScenario):
+    """Implements the 'Volume-Confirmed Breakout' scan."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def run(self, stock_data: pd.DataFrame, fundamental_data: Dict, stock_info: Dict) -> Optional[ReboundCandidate]:
+        # Calculate 52-week high from history
+        high_52w = stock_data['High'].iloc[:-1].max()
+
+        # Calculate 20-day average volume
+        avg_volume_20d = stock_data['Volume'].iloc[-21:-1].mean()
+
+        if pd.isna(high_52w) or pd.isna(avg_volume_20d) or avg_volume_20d == 0:
+            return None
+
+        latest_price = stock_data['Close'].iloc[-1]
+        latest_volume = stock_data['Volume'].iloc[-1]
+
+        # Apply filters
+        is_near_high = latest_price >= (high_52w * 0.98)
+        is_volume_surge = latest_volume > (avg_volume_20d * 1.5)
+
+        if not (is_near_high and is_volume_surge):
+            return None
+
+        # Create candidate
+        self._emit_progress(f"!!! {stock_info['ticker']} is a potential '{self.name}' candidate.")
+
+        volume_ratio = latest_volume / avg_volume_20d
+
+        technicals_dict = {
+            'price': round(latest_price, 2),
+            '52w_high': round(high_52w, 2),
+            'volume_ratio': round(volume_ratio, 2)
+        }
+
+        technical_score = int(min(100, (volume_ratio / 3.0) * 100))
+
+        return ReboundCandidate(
+            ticker=stock_info['ticker'],
+            scenario=self.name,
+            rebound_score=0,
+            technical_score=technical_score,
+            fundamentals=self._get_fundamentals_for_candidate(fundamental_data, stock_info),
+            history_df=stock_data,
+            technicals=technicals_dict
+        )
+
+class StochasticOversoldScenario(BaseScenario):
+    """Implements the 'Stochastic Oversold' scan."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def run(self, stock_data: pd.DataFrame, fundamental_data: Dict, stock_info: Dict) -> Optional[ReboundCandidate]:
+        # Calculate Stochastic Oscillator
+        stock_data['stoch_k'], stock_data['stoch_d'] = calculate_stochastic(
+            stock_data['High'], stock_data['Low'], stock_data['Close']
+        )
+
+        if 'stoch_k' not in stock_data.columns or 'stoch_d' not in stock_data.columns:
+            return None
+
+        k_today, k_yesterday = stock_data['stoch_k'].iloc[-1], stock_data['stoch_k'].iloc[-2]
+        d_today, d_yesterday = stock_data['stoch_d'].iloc[-1], stock_data['stoch_d'].iloc[-2]
+
+        if pd.isna(k_today) or pd.isna(d_today) or pd.isna(k_yesterday) or pd.isna(d_yesterday):
+            return None
+
+        # Apply filter: %K crosses above %D below the 20 level
+        is_crossover = k_yesterday < d_yesterday and k_today > d_today
+        is_oversold = k_today < 20 and d_today < 20
+
+        if not (is_crossover and is_oversold):
+            return None
+
+        # Create candidate
+        self._emit_progress(f"!!! {stock_info['ticker']} is a potential '{self.name}' candidate.")
+
+        technicals_dict = {
+            'price': round(stock_data['Close'].iloc[-1], 2),
+            'stoch_k': round(k_today, 2),
+            'stoch_d': round(d_today, 2)
+        }
+
+        technical_score = int(100 - (k_today / 20.0 * 100))
+
+        return ReboundCandidate(
+            ticker=stock_info['ticker'],
+            scenario=self.name,
+            rebound_score=0,
+            technical_score=technical_score,
+            fundamentals=self._get_fundamentals_for_candidate(fundamental_data, stock_info),
+            history_df=stock_data,
+            technicals=technicals_dict
+        )
+
+# (Other existing scenario classes remain unchanged)
 class ClassicOversoldScenario(BaseScenario):
     """Implements the 'Classic Oversold' scan: Oversold RSI, near 200-SMA and 90-day-low."""
     def __init__(self, *args, **kwargs): super().__init__(*args, **kwargs)
@@ -532,11 +682,26 @@ class ScenarioRunner:
         "GoldenCrossScenario": GoldenCrossScenario, "MeanReversionScenario": MeanReversionScenario,
         "VolatilitySqueezeScenario": VolatilitySqueezeScenario, "HighQualityDividendScenario": HighQualityDividendScenario,
         "FloorConsolidationScenario": FloorConsolidationScenario,
+        # New Scenarios
+        "GarpTrendScenario": GarpTrendScenario,
+        "VolumeBreakoutScenario": VolumeBreakoutScenario,
+        "StochasticOversoldScenario": StochasticOversoldScenario,
     }
     def __init__(self, progress_callback: Callable = None, progress_percent_callback: Callable = None, is_cancelled_callback: Callable = None):
-        self.progress_callback = progress_callback; self.progress_percent_callback = progress_percent_callback
+        self.progress_callback = progress_callback
+        self.progress_percent_callback = progress_percent_callback
         self.is_cancelled = is_cancelled_callback if is_cancelled_callback else lambda: False
-        self.scenarios_config = ScenarioRunner.load_scenarios_config(); self.fundamental_handler = FundamentalDataHandler()
+        self.scenarios_config = ScenarioRunner.load_scenarios_config()
+        self.fundamental_handler = FundamentalDataHandler()
+
+        # For logging and telemetry
+        self.telemetry = {
+            "scan_duration_seconds": 0,
+            "total_tickers_in_universe": 0,
+            "tickers_processed": 0,
+            "tickers_skipped": {"total": 0, "missing_fundamentals": 0, "insufficient_history": 0, "liquidity": 0, "other": 0},
+            "cache_hit_rate_percent": 0
+        }
     @staticmethod
     def load_scenarios_config() -> List[Dict[str, Any]]:
         try:
@@ -553,57 +718,108 @@ class ScenarioRunner:
         class_name = scenario_config.get("class"); ScenarioClass = self.SCENARIO_CLASS_MAP.get(class_name)
         if not ScenarioClass: self._emit_progress(f"Error: Scenario class '{class_name}' not implemented."); return None
         return ScenarioClass(name=scenario_config['name'], progress_callback=self.progress_callback, progress_percent_callback=self.progress_percent_callback, is_cancelled_callback=self.is_cancelled)
+
     async def run_scan(self, scenario_id: str, ticker: str = None) -> List[ReboundCandidate]:
+        start_time = time.time()
         scenario_instance = self._get_scenario_instance(scenario_id)
+        scenario_params = next((s.get('params', {}) for s in self.scenarios_config if s['id'] == scenario_id), {})
+
         if not scenario_instance: return []
         if ticker: all_tickers_by_market = {"CUSTOM": [ticker]}
         else: all_tickers_by_market = data_loader.get_all_tickers()
-        all_candidates = []; total_tickers = sum(len(t) for t in all_tickers_by_market.values()); processed_tickers = 0
+
+        all_candidates = []
+        all_tickers_flat = [t for sublist in all_tickers_by_market.values() for t in sublist]
+        total_tickers = len(all_tickers_flat)
+        self.telemetry['total_tickers_in_universe'] = total_tickers
+
+        # --- Data Fetching Phase ---
+        self._emit_progress("Fetching all required data...")
+        historical_data_map = await data_loader.get_historical_data_for_tickers(all_tickers_flat, self.progress_callback, self.is_cancelled)
+        if self.is_cancelled(): return []
+
+        fundamental_data_map = await self.fundamental_handler.get_fundamentals_for_tickers(all_tickers_flat, self.progress_callback, self.is_cancelled)
+        if self.is_cancelled(): return []
+
+        self._emit_progress("Calculating sector medians...")
+        self.fundamental_handler.compute_and_save_sector_medians()
+        sector_stats = {}
+        if SECTOR_MEDIANS_FILE.exists():
+            with open(SECTOR_MEDIANS_FILE, 'r') as f: sector_stats = json.load(f)
+        else: self._emit_progress("Warning: Could not load sector medians.")
+
+        # --- Analysis Phase ---
         for market, tickers in all_tickers_by_market.items():
             if self.is_cancelled(): break
-            self._emit_progress(f"--- Processing Market: {market} ({len(tickers)} tickers) ---")
+            self._emit_progress(f"--- Analyzing Market: {market} ({len(tickers)} tickers) ---")
+
             index_data = None
             if market != 'CUSTOM' and not ticker:
                 index_ticker = next((d['index_ticker'] for d in config.INDICES.values() if d['market'] == market), None)
-                if index_ticker: index_data = await data_loader.get_stock_data(index_ticker)
+                if index_ticker:
+                    index_data = historical_data_map.get(index_ticker)
                 if not passes_market_context_filter(index_data, config.MARKET_CONTEXT_SMA):
-                    self._emit_progress(f"Market context for {market} is bearish. Skipping market."); processed_tickers += len(tickers); continue
-            self._emit_progress(f"Fetching fundamental data for {len(tickers)} tickers in {market}...")
-            fundamental_data_map = await self.fundamental_handler.get_fundamentals_for_tickers(tickers, self.progress_callback, self.is_cancelled)
-            self._emit_progress(f"Calculating sector medians for {market}...")
-            self.fundamental_handler.compute_and_save_sector_medians()
-            sector_stats = {}
-            if SECTOR_MEDIANS_FILE.exists():
-                with open(SECTOR_MEDIANS_FILE, 'r') as f: sector_stats = json.load(f)
-            else: self._emit_progress(f"Warning: Could not load sector medians after calculation.")
+                    self._emit_progress(f"Market context for {market} is bearish. Skipping market."); self.telemetry['tickers_processed'] += len(tickers); continue
+
             for ticker_val in tickers:
                 if self.is_cancelled(): break
-                processed_tickers += 1; self._emit_percent(int((processed_tickers / total_tickers) * 100))
-                self._emit_progress(f"Analyzing [{processed_tickers}/{total_tickers}] {ticker_val}")
+                self.telemetry['tickers_processed'] += 1
+                self._emit_percent(int((self.telemetry['tickers_processed'] / total_tickers) * 100))
+                self._emit_progress(f"Analyzing [{self.telemetry['tickers_processed']}/{total_tickers}] {ticker_val}")
+
+                # Pre-flight checks
                 stock_info = get_ticker_info_cached(ticker_val)
-                if not passes_liquidity_filter(stock_info): continue
+                if not passes_liquidity_filter(stock_info):
+                    self.telemetry['tickers_skipped']['total'] += 1
+                    self.telemetry['tickers_skipped']['liquidity'] += 1
+                    continue
+
+                stock_data = historical_data_map.get(ticker_val)
+                min_history = scenario_params.get('min_history')
+                if stock_data is None or (min_history and len(stock_data) < min_history):
+                    self.telemetry['tickers_skipped']['total'] += 1
+                    self.telemetry['tickers_skipped']['insufficient_history'] += 1
+                    continue
+
+                required_info = scenario_params.get('required_info', [])
+                has_all_info = True
+                for key in required_info:
+                    if safe_get(stock_info, key) is None:
+                        has_all_info = False
+                        break
+                if not has_all_info:
+                    self.telemetry['tickers_skipped']['total'] += 1
+                    self.telemetry['tickers_skipped']['missing_fundamentals'] += 1
+                    continue
+
                 if stock_info: stock_info['ticker'] = ticker_val
-                stock_data = await data_loader.get_stock_data(ticker_val)
-                if stock_data is None or stock_data.empty: continue
                 fundamental_data = fundamental_data_map.get(ticker_val)
+
                 try:
                     candidate = scenario_instance.run(stock_data, fundamental_data, stock_info)
                     if candidate:
                         tech_score = candidate.technical_score; fund_score = 0
-                        # The candidate.fundamentals dict is now pre-populated by the run() method
                         if candidate.fundamentals:
                             if scenario_id == 'high_quality_dividend': weights = DIVIDEND_SCENARIO_FUNDAMENTAL_WEIGHTS
                             elif scenario_id == 'fundamental_divergence': weights = DIVERGENCE_SCENARIO_FUNDAMENTAL_WEIGHTS
                             else: weights = DEFAULT_FUNDAMENTAL_WEIGHTS
-                            # We pass candidate.fundamentals here, which is the combined dict
-                            fund_score, fund_breakdown = compute_fundamental_score(fundamentals=candidate.fundamentals, sector=fundamental_data.get('sector', 'N/A'), sector_stats=sector_stats, weights=weights)
+                            fund_score, fund_breakdown = compute_fundamental_score(fundamentals=candidate.fundamentals, sector=fundamental_data.get('sector', 'N/A') if fundamental_data else 'N/A', sector_stats=sector_stats, weights=weights)
                             candidate.fundamental_score = fund_score
-                            candidate.score_breakdown.update(fund_breakdown)
+                            if candidate.score_breakdown:
+                                candidate.score_breakdown.update(fund_breakdown)
+                            else:
+                                candidate.score_breakdown = fund_breakdown
+
                         market_score = compute_market_context_score(index_data)
                         candidate.market_context_score = market_score
                         candidate.rebound_score = compute_rebound_score(tech_score, fund_score, market_score, DEFAULT_REBOUND_SCORE_WEIGHTS)
                         all_candidates.append(candidate)
                 except Exception as e:
+                    self.telemetry['tickers_skipped']['total'] += 1
+                    self.telemetry['tickers_skipped']['other'] += 1
                     logging.error(f"Error processing {ticker_val} in scenario {scenario_id}: {e}", exc_info=True)
+
+        end_time = time.time()
+        self.telemetry['scan_duration_seconds'] = round(end_time - start_time, 2)
         self._emit_progress(f"Scan complete. Found {len(all_candidates)} candidates.")
         return all_candidates

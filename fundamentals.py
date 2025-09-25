@@ -15,9 +15,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # --- Constants ---
 CACHE_DIR = Path.home() / ".local" / "share" / "rectifex" / "cache"
+import config
+
 FUNDAMENTALS_DIR = CACHE_DIR / "fundamentals"
 SECTOR_MEDIANS_FILE = CACHE_DIR / "sector_medians.json"
-CACHE_EXPIRY_DAYS = 7
 
 
 class FundamentalDataHandler:
@@ -37,7 +38,7 @@ class FundamentalDataHandler:
                 with open(cache_file, 'r') as f:
                     data = json.load(f)
                 last_update = datetime.fromisoformat(data['last_update'])
-                if datetime.now(timezone.utc) - last_update < timedelta(days=CACHE_EXPIRY_DAYS):
+                if datetime.now(timezone.utc) - last_update < timedelta(days=config.FUNDAMENTAL_CACHE_EXPIRY_DAYS):
                     logging.info(f"Loading fundamentals for {ticker} from cache.")
                     return data
             except (json.JSONDecodeError, KeyError, Exception) as e:
@@ -138,10 +139,11 @@ class FundamentalDataHandler:
     async def _fetch_single_ticker(self, ticker: str) -> Optional[Dict[str, Any]]:
         """
         Fetches and processes fundamental data for a single ticker.
-        Includes a retry mechanism for transient network errors.
+        Includes a retry mechanism with exponential backoff for transient network errors.
         This runs synchronous yfinance calls in a separate thread.
         """
         max_retries = 3
+        base_wait_time = 2  # seconds
         for attempt in range(max_retries):
             try:
                 logging.info(f"Fetching fundamentals for {ticker} from yfinance (Attempt {attempt + 1}/{max_retries}).")
@@ -153,6 +155,7 @@ class FundamentalDataHandler:
                 if not metrics:
                     # This indicates a soft failure (e.g., missing data), not a network error.
                     # No need to retry in this case.
+                    logging.warning(f"Could not calculate metrics for {ticker}, skipping.")
                     return None
 
                 # Final structure as per spec
@@ -170,8 +173,8 @@ class FundamentalDataHandler:
                 logging.warning(f"Attempt {attempt + 1} for {ticker} failed: {e}")
                 if attempt < max_retries - 1:
                     # Wait with exponential backoff before retrying
-                    wait_time = (attempt + 1) * 2
-                    logging.info(f"Retrying in {wait_time} seconds...")
+                    wait_time = base_wait_time * (2 ** attempt) + random.uniform(0, 1)
+                    logging.info(f"Retrying {ticker} in {wait_time:.2f} seconds...")
                     await asyncio.sleep(wait_time)
                 else:
                     logging.error(f"All {max_retries} attempts failed for {ticker}. Error: {e}", exc_info=False)

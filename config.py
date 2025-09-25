@@ -54,10 +54,12 @@ INDICES = {
 APP_DATA_DIR = Path(os.path.expanduser("~")) / ".config" / "GlobalReboundScreener"
 USER_TICKER_DIR = APP_DATA_DIR / "tickers"
 CACHE_DIR = Path(os.path.expanduser("~")) / ".cache" / "GlobalReboundScreener"
-CACHE_EXPIRY_HOURS = 22 # Cache is valid for 22 hours
+HISTORICAL_CACHE_EXPIRY_HOURS = 24  # Cache for OHLCV data is valid for 24 hours
+FUNDAMENTAL_CACHE_EXPIRY_DAYS = 7    # Cache for fundamental .info data is valid for 7 days
 
 # -- Data Loading Configuration --
 DATA_PERIOD = "18mo" # Download 18 months of historical data
+SAFE_GET_DEFAULT = None # Default value for the safe_get utility
 
 # -- Analysis & Filtering Criteria --
 
