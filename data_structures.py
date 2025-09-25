@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
 import config
+import pandas as pd
 
 def safe_get(data: dict, key: str, default: Optional[Any] = config.SAFE_GET_DEFAULT) -> Optional[Any]:
     """
@@ -16,18 +17,11 @@ def safe_get(data: dict, key: str, default: Optional[Any] = config.SAFE_GET_DEFA
     if value is None:
         return default
 
-    # Check if a value that should be numeric is actually numeric
-    # This handles cases where yfinance returns 'N/A' or other non-numeric strings
     if isinstance(value, (int, float)):
-        # Check for NaN (Not a Number) for float types
-        if isinstance(value, float) and value != value: # NaN check
+        if pd.isna(value):
             return default
         return value
 
-    # If a non-numeric type is acceptable for a key, the caller should handle it.
-    # This function primarily guards financial calculations.
-    # For now, we allow non-numeric types to pass through if they are not None.
-    # A more stringent check could be added here if needed.
     return value
 
 

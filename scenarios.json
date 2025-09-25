@@ -122,37 +122,25 @@
   {
     "id": "garp_trend",
     "group": "Value & Fundamental",
-    "group_description": "Find quality companies at a fair price.",
     "name": "GARP with Trend Filter",
-    "description": "A 'Growth at a Reasonable Price' (GARP) scan that also requires a positive short-term price trend.",
-    "what_it_is": "This scan looks for companies with solid earnings growth and a reasonable valuation (P/E ratio), but only considers those whose stock price is currently trading above its 50-day moving average, indicating positive momentum.",
-    "best_for": "Investors who want growth but are wary of overpaying for it, and who prefer to invest in stocks that are already showing signs of strength.",
-    "signals": ["earnings_growth", "pe_ratio", "price_gt_sma50"],
-    "params": {"min_growth": 0.10, "max_pe": 25, "required_info": ["earningsGrowth", "trailingPE"], "min_history": 50},
+    "description": "Finds growth stocks at a reasonable price that are in a positive short-term trend.",
+    "params": {"required_info": ["earningsGrowth", "trailingPE"], "min_history": 50},
     "class": "GarpTrendScenario"
   },
   {
     "id": "volume_breakout",
     "group": "Trend & Momentum",
-    "group_description": "Find stocks with strong price momentum.",
     "name": "Volume-Confirmed Breakout",
-    "description": "Identifies stocks breaking out to new highs with a significant increase in trading volume, confirming investor interest.",
-    "what_it_is": "This scan finds stocks whose current price is within 2% of their 52-week high, and where the most recent day's trading volume is at least 50% higher than the 20-day average volume.",
-    "best_for": "Momentum traders looking for strong confirmation of a breakout before entering a position.",
-    "signals": ["near_52w_high", "volume_surge"],
-    "params": {"proximity_pct": 2.0, "volume_multiplier": 1.5, "min_history": 252},
+    "description": "Identifies stocks breaking out to new highs on a surge of volume.",
+    "params": {"min_history": 252},
     "class": "VolumeBreakoutScenario"
   },
   {
     "id": "stochastic_oversold",
     "group": "Contrarian & Reversion",
-    "group_description": "Find stocks moving against the current trend.",
     "name": "Stochastic Oversold",
-    "description": "Finds stocks that are in an oversold condition based on the Stochastic Oscillator, signaling a potential upward reversal.",
-    "what_it_is": "This scan identifies stocks where the Stochastic Oscillator's %K line has crossed above the %D line while both are in the 'oversold' territory (below 20), suggesting that downward momentum is fading.",
-    "best_for": "Short-term swing traders looking for technical signals of a potential price bounce.",
-    "signals": ["stoch_k", "stoch_d", "oversold_level"],
-    "params": {"oversold_level": 20, "min_history": 20},
+    "description": "Finds oversold stocks where momentum may be reversing.",
+    "params": {"min_history": 20},
     "class": "StochasticOversoldScenario"
   }
 ]
