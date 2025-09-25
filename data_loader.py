@@ -220,13 +220,13 @@ async def get_historical_data_for_tickers(
                 cache_file = config.CACHE_DIR / f"{ticker.replace('^', 'INDEX-')}.csv"
                 await asyncio.to_thread(data.to_csv, cache_file)
             return ticker, data
-    for ticker in tickers_to_fetch:
-        tasks.append(fetch_and_cache(ticker))
+    tasks = [asyncio.create_task(fetch_and_cache(t)) for t in tickers_to_fetch]
 
     fetched_count = 0
     for future in asyncio.as_completed(tasks):
         if is_cancelled():
-            for task in tasks: task.cancel()
+            for task in tasks:
+                task.cancel()
             break
         try:
             ticker, data = await future

@@ -103,10 +103,11 @@ class FundamentalDataHandler:
                 if is_cancelled(): return ticker, None
                 return ticker, await self._fetch_single_ticker(ticker)
 
-        tasks = [fetch_with_semaphore(t) for t in tickers_to_fetch]
+        tasks = [asyncio.create_task(fetch_with_semaphore(t)) for t in tickers_to_fetch]
         for future in asyncio.as_completed(tasks):
             if is_cancelled():
-                for task in tasks: task.cancel()
+                for task in tasks:
+                    task.cancel()
                 break
             try:
                 ticker, data = await future
