@@ -16,6 +16,9 @@ from typing import List, Dict, Callable, Optional
 # Assuming config.py is in the same directory
 import config
 
+# Define the base directory of the project to reliably locate data files
+BASE_DIR = Path(__file__).resolve().parent
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -53,13 +56,16 @@ def _get_tickers_from_wiki(index_details: dict) -> list[str] | None:
 
 def _get_tickers_from_csv(index_details: dict) -> list[str]:
     """
-    Loads a list of tickers from a fallback CSV file.
+    Loads a list of tickers from a fallback CSV file using an absolute path.
     """
-    fallback_path = Path(index_details['fallback_csv'])
+    # Construct an absolute path to the CSV file
+    fallback_path = BASE_DIR / index_details['fallback_csv']
     if not fallback_path.exists():
+        logging.warning(f"Fallback CSV not found at {fallback_path}")
         return []
     try:
         df = pd.read_csv(fallback_path)
+        # Use the 'Ticker' column if it exists, otherwise assume the first column
         ticker_col = 'Ticker' if 'Ticker' in df.columns else df.columns[0]
         return df[ticker_col].dropna().tolist()
     except Exception as e:
@@ -105,10 +111,11 @@ def get_ticker_list(index_name: str) -> list[str]:
 
 def get_master_ticker_list() -> list[str] | None:
     """
-    Loads tickers from the master CSV file if it exists.
+    Loads tickers from the master CSV file if it exists, using an absolute path.
     """
-    master_list_path = Path("data/master_tickers.csv")
+    master_list_path = BASE_DIR / "data" / "master_tickers.csv"
     if not master_list_path.exists():
+        logging.warning(f"Master ticker list not found at {master_list_path}")
         return None
     try:
         df = pd.read_csv(master_list_path)
