@@ -1,5 +1,35 @@
 from dataclasses import dataclass, field
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+import config
+
+def safe_get(data: dict, key: str, default: Optional[Any] = config.SAFE_GET_DEFAULT) -> Optional[Any]:
+    """
+    Safely retrieves a value from a dictionary. Returns the default value if the
+    key is missing or the retrieved value is None, not a number, or NaN.
+    This prevents TypeErrors or ValueErrors during calculations.
+    """
+    if not isinstance(data, dict):
+        return default
+
+    value = data.get(key, default)
+
+    if value is None:
+        return default
+
+    # Check if a value that should be numeric is actually numeric
+    # This handles cases where yfinance returns 'N/A' or other non-numeric strings
+    if isinstance(value, (int, float)):
+        # Check for NaN (Not a Number) for float types
+        if isinstance(value, float) and value != value: # NaN check
+            return default
+        return value
+
+    # If a non-numeric type is acceptable for a key, the caller should handle it.
+    # This function primarily guards financial calculations.
+    # For now, we allow non-numeric types to pass through if they are not None.
+    # A more stringent check could be added here if needed.
+    return value
+
 
 @dataclass
 class ReboundCandidate:

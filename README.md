@@ -37,12 +37,15 @@ The application uses a categorized library of scenarios to find potential candid
 *   **Floor Consolidation - Universal**: A powerful new scan that finds stocks that have entered a stable, low-volume consolidation phase after a significant price crash, indicating a potential bottom.
 *   **Floor Consolidation - Quality**: A variant of the Universal scan that adds strict filters for fundamental strength (high Fundamental Score) and a prior long-term uptrend, aiming to find high-quality companies that are showing signs of stabilization.
 *   **Mean Reversion (Bollinger Bands)**: A short-term strategy that identifies statistically oversold conditions when a stock's price touches or closes below its lower Bollinger Band.
+*   **Stochastic Oversold**: Finds stocks that are in an oversold condition based on the Stochastic Oscillator, signaling a potential upward reversal. It identifies when the %K line has crossed above the %D line while both are in 'oversold' territory (below 20).
 
 ### Trend & Momentum (Find stocks with strong price momentum)
 *   **Momentum Breakout**: A classic momentum strategy that identifies stocks breaking out to new 52-week highs on a surge in trading volume.
 *   **Golden Cross**: A long-term trend-following signal that occurs when the 50-day moving average crosses above the 200-day moving average, signaling a potential major uptrend.
+*   **Volume-Confirmed Breakout**: Identifies stocks breaking out to new highs with a significant increase in trading volume, confirming investor interest. It finds stocks whose price is within 2% of their 52-week high, and where the most recent day's volume is at least 50% higher than the 20-day average.
 
 ### Value & Fundamental (Find quality companies at a fair price)
+*   **GARP with Trend Filter**: A 'Growth at a Reasonable Price' (GARP) scan that also requires a positive short-term price trend. It looks for companies with solid earnings growth and a reasonable valuation (P/E ratio), but only considers those whose stock price is currently trading above its 50-day moving average.
 *   **Quality Stock Pullback**: "Buys the dip" on fundamentally strong companies in a long-term uptrend that have experienced a minor pullback to a short-term support level like the 50-day moving average.
 *   **Fundamental Divergence**: A value-oriented strategy that finds companies with solid fundamentals whose stock price has been stagnating or underperforming the market.
 *   **High-Quality Dividend**: Focuses not just on high dividend yield, but on the *sustainability* of that dividend by filtering for companies with healthy financials (e.g., reasonable payout ratio, low debt).
@@ -92,6 +95,9 @@ The application scans major world indices by default. You can add your own custo
 4.  These lists will appear in the "Index" selection dropdown for you to scan.
 
 **Important:** Tickers must be in a format that `yfinance` can understand (e.g., `AAPL`, `MSFT`, `6758.T` for a stock on the Tokyo exchange, `SAP.DE` for a stock on XETRA).
+
+### Hinweis zur Datenverfügbarkeit
+Die App ist auf kostenlos verfügbare Daten von Yahoo Finance angewiesen. Insbesondere bei kleineren oder internationalen Aktien kann es vorkommen, dass bestimmte Fundamentaldaten (z.B. Gewinnwachstum) nicht verfügbar sind. Ticker, für die essenzielle Daten fehlen, werden vom jeweiligen Scan automatisch ausgeschlossen, um die Ergebnisqualität zu sichern.
 
 ## Explanation of Scan Results
 

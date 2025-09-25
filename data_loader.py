@@ -9,6 +9,8 @@ from pathlib import Path
 import logging
 import asyncio
 import functools
+import time
+from typing import List, Dict, Callable, Optional
 
 # Assuming config.py is in the same directory
 import config
@@ -193,66 +195,135 @@ def get_all_tickers() -> dict[str, list[str]]:
     # Convert sets to lists
     return {market: sorted(list(tickers)) for market, tickers in market_to_tickers.items()}
 
-async def get_stock_data(ticker: str) -> pd.DataFrame | None:
+async def _fetch_single_ticker_history(ticker: str) -> pd.DataFrame | None:
     """
-    Asynchronously downloads historical data for a single stock, using a local cache.
-    The cache for a ticker is valid for `config.CACHE_EXPIRY_HOURS`.
-    Blocking I/O operations (network, disk) are run in a separate thread.
+    Asynchronously downloads historical data for a single stock with exponential backoff.
+    """
+    max_retries = 3
+    base_wait_time = 2  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            loop = asyncio.get_running_loop()
+            download_func = functools.partial(
+                yf.download,
+                tickers=ticker,
+                period=config.DATA_PERIOD,
+                auto_adjust=True,
+                progress=False
+            )
+            data = await loop.run_in_executor(None, download_func)
+
+            if data.empty:
+                logging.warning(f"No data returned from yfinance for ticker: {ticker}")
+                return None # Don't retry for empty data, it's a valid (but empty) response
+
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = data.columns.get_level_values(0)
+            data.dropna(inplace=True)
+            return data
+
+        except Exception as e:
+            # This could be a network error, yfinance error, etc.
+            logging.warning(f"Attempt {attempt + 1} for {ticker} failed: {e}")
+            if attempt < max_retries - 1:
+                wait_time = base_wait_time * (2 ** attempt) + random.uniform(0, 1)
+                logging.info(f"Retrying {ticker} in {wait_time:.2f} seconds...")
+                await asyncio.sleep(wait_time)
+            else:
+                logging.error(f"All {max_retries} attempts failed for {ticker}. Error: {e}")
+    return None
+
+async def get_historical_data_for_tickers(
+    tickers: List[str],
+    progress_callback: Optional[Callable] = None,
+    is_cancelled_callback: Optional[Callable] = None
+) -> Dict[str, pd.DataFrame]:
+    """
+    Asynchronously retrieves historical data for a list of tickers.
+    - Uses a local cache first.
+    - Fetches missing data in parallel using a semaphore.
+    - Implements exponential backoff for failed requests.
+    - Returns a dictionary of {ticker: dataframe}.
     """
     ensure_cache_dir_exists()
-    cache_file = config.CACHE_DIR / f"{ticker.replace('^', 'INDEX-')}.csv"
+    is_cancelled = is_cancelled_callback or (lambda: False)
+    results = {}
+    tickers_to_fetch = []
+    cache_hits = 0
 
-    # Check if a valid cache file exists (fast, can stay sync)
-    if cache_file.exists():
-        mod_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
-        if datetime.now() - mod_time < timedelta(hours=config.CACHE_EXPIRY_HOURS):
-            logging.info(f"Loading {ticker} data from cache.")
-            try:
-                loop = asyncio.get_running_loop()
-                # Use functools.partial to pass arguments to the blocking function in the executor
-                read_func = functools.partial(pd.read_csv, cache_file, index_col='Date', parse_dates=['Date'])
-                df = await loop.run_in_executor(None, read_func)
-                return df
-            except Exception as e:
-                logging.warning(f"Could not read cache file for {ticker}, refetching. Error: {e}")
+    for ticker in tickers:
+        if is_cancelled(): break
+        cache_file = config.CACHE_DIR / f"{ticker.replace('^', 'INDEX-')}.csv"
+        if cache_file.exists():
+            mod_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
+            if datetime.now() - mod_time < timedelta(hours=config.HISTORICAL_CACHE_EXPIRY_HOURS):
+                try:
+                    df = await asyncio.to_thread(pd.read_csv, cache_file, index_col='Date', parse_dates=['Date'])
+                    results[ticker] = df
+                    cache_hits += 1
+                    continue
+                except Exception as e:
+                    logging.warning(f"Could not read cache for {ticker}, refetching. Error: {e}")
+        tickers_to_fetch.append(ticker)
 
-    # If no valid cache, download from yfinance in a separate thread
-    logging.info(f"Downloading {ticker} data from yfinance for period: {config.DATA_PERIOD}.")
-    try:
-        loop = asyncio.get_running_loop()
-        # yf.download is a blocking I/O function, so run it in an executor
-        download_func = functools.partial(
-            yf.download,
-            tickers=ticker,
-            period=config.DATA_PERIOD,
-            auto_adjust=True,
-            progress=False
-        )
-        data = await loop.run_in_executor(None, download_func)
+    if progress_callback:
+        progress_callback(f"Loaded {cache_hits}/{len(tickers)} historical records from cache.")
 
-        if data.empty:
-            logging.warning(f"No data returned from yfinance for ticker: {ticker}")
-            return None
+    if not tickers_to_fetch or is_cancelled():
+        return results
 
-        # Flatten the columns if they are MultiIndex
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = data.columns.get_level_values(0)
+    semaphore = asyncio.Semaphore(8)  # Limit concurrent downloads to 8 as per spec
+    tasks = []
 
-        # Drop rows with NaN values which can be returned by yfinance
-        data.dropna(inplace=True)
+    async def fetch_and_cache(ticker: str):
+        async with semaphore:
+            if is_cancelled(): return ticker, None
 
-        if data.empty:
-            logging.warning(f"DataFrame for {ticker} is empty after dropping NaNs. Not caching.")
-            return None
+            logging.info(f"Downloading {ticker} data from yfinance.")
+            data = await _fetch_single_ticker_history(ticker)
 
-        # Save to cache in an executor as well to avoid blocking
-        save_func = functools.partial(data.to_csv, cache_file)
-        await loop.run_in_executor(None, save_func)
-        logging.info(f"Saved {ticker} data to cache.")
-        return data
-    except Exception as e:
-        logging.error(f"Failed to download data for {ticker}: {e}", exc_info=True)
-        return None
+            if data is not None and not data.empty:
+                cache_file = config.CACHE_DIR / f"{ticker.replace('^', 'INDEX-')}.csv"
+                await asyncio.to_thread(data.to_csv, cache_file)
+                logging.info(f"Saved {ticker} data to cache.")
+
+            return ticker, data
+
+    for ticker in tickers_to_fetch:
+        tasks.append(fetch_and_cache(ticker))
+
+    fetched_count = 0
+    total_to_fetch = len(tickers_to_fetch)
+    for future in asyncio.as_completed(tasks):
+        if is_cancelled():
+            for task in tasks: task.cancel()
+            break
+
+        try:
+            ticker, data = await future
+            if data is not None:
+                results[ticker] = data
+
+            fetched_count += 1
+            if progress_callback:
+                progress_callback(f"Fetched historical data for {ticker} ({fetched_count}/{total_to_fetch})")
+        except asyncio.CancelledError:
+            pass
+
+    return results
+
+
+# --- DEPRECATED ---
+# This function is kept for single-ticker calls from older parts of the code,
+# but the new `get_historical_data_for_tickers` should be used for batch processing.
+async def get_stock_data(ticker: str) -> pd.DataFrame | None:
+    """
+    (DEPRECATED) Asynchronously downloads historical data for a single stock, using a local cache.
+    """
+    result_dict = await get_historical_data_for_tickers([ticker])
+    return result_dict.get(ticker)
+
 
 if __name__ == '__main__':
     # Example usage and testing
@@ -269,18 +340,22 @@ if __name__ == '__main__':
     for market, tickers in all_tickers_by_market.items():
         print(f"Market: {market}, Found: {len(tickers)} tickers. Example: {tickers[0] if tickers else 'N/A'}")
 
-    # Test getting stock data for a single ticker (with caching)
-    print("\n[3] Testing stock data retrieval for AAPL...")
-    aapl_data = get_stock_data('AAPL')
-    if aapl_data is not None:
-        print("Successfully fetched AAPL data.")
-        print(f"Data from {aapl_data.index.min().date()} to {aapl_data.index.max().date()}")
-        print(aapl_data.tail(2))
+    async def run_async_test():
+        # Test getting stock data for a list of tickers (with caching)
+        print("\n[3] Testing stock data retrieval for multiple tickers...")
+        test_tickers = ['AAPL', 'MSFT', 'GOOG', 'TSLA', 'NONEXISTENT']
 
-    print("\n[4] Testing stock data retrieval for a German ticker (SAP.DE)...")
-    sap_data = get_stock_data('SAP.DE')
-    if sap_data is not None:
-        print("Successfully fetched SAP.DE data.")
-        print(sap_data.tail(2))
+        def progress_reporter(msg: str):
+            print(f"PROGRESS: {msg}")
+
+        all_data = await get_historical_data_for_tickers(test_tickers, progress_callback=progress_reporter)
+
+        for ticker in test_tickers:
+            if ticker in all_data:
+                print(f"Successfully fetched {ticker} data. Shape: {all_data[ticker].shape}")
+            else:
+                print(f"Failed to fetch data for {ticker}.")
+
+    asyncio.run(run_async_test())
 
     print("\n--- Test complete ---")
