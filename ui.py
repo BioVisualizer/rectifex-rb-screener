@@ -61,7 +61,7 @@ class AnalysisWorker(QObject):
     def run(self):
         """Runs the analysis and emits signals for progress and completion."""
         try:
-            runner = ScenarioRunner(
+            self.runner = ScenarioRunner(
                 progress_callback=self.signals.progress,
                 progress_percent_callback=self.signals.progress_percent,
                 is_cancelled_callback=lambda: self._is_cancelled
