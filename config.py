@@ -4,6 +4,9 @@
 import os
 from pathlib import Path
 
+# Define the absolute base directory of the project
+BASE_DIR = Path(__file__).resolve().parent
+
 # -- Data Source Configuration --
 
 # Defines the stock indices to be scanned.
