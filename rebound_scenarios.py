@@ -16,15 +16,8 @@ import time
 import config
 import data_loader
 from data_structures import ReboundCandidate, safe_get
-from fundamentals import FundamentalDataHandler, FUNDAMENTALS_DIR, SECTOR_MEDIANS_FILE
+from fundamentals import FundamentalDataHandler
 from scoring import (
-    compute_fundamental_score,
-    compute_rebound_score,
-    compute_market_context_score,
-    passes_market_context_filter,
-    DEFAULT_FUNDAMENTAL_WEIGHTS,
-    DIVIDEND_SCENARIO_FUNDAMENTAL_WEIGHTS,
-    DIVERGENCE_SCENARIO_FUNDAMENTAL_WEIGHTS,
     DEFAULT_REBOUND_SCORE_WEIGHTS,
     compute_floor_score,
 )
@@ -64,68 +57,18 @@ def calculate_macd(data: pd.Series, fast_period=12, slow_period=26, signal_perio
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def get_ticker_info_cached(ticker: str) -> dict | None:
-    """
-    Retrieves full ticker info from yfinance.
-    NOTE: This is a simplified, blocking version.
-    A full implementation would use async and caching.
-    """
-    try:
-        return yf.Ticker(ticker).info
-    except Exception as e:
-        logging.warning(f"Could not fetch info for {ticker}: {e}")
-        return None
-
-
-def passes_liquidity_filter(ticker_info: dict) -> bool:
-    """
-    Checks if a stock passes basic liquidity and size filters.
-    """
-    if not ticker_info:
-        return False
-
-    min_market_cap = settings.get('min_market_cap')
-    min_avg_volume = settings.get('min_avg_volume_30d')
-
-    market_cap = ticker_info.get('marketCap')
-    avg_volume = ticker_info.get('averageVolume') # 3-month average volume
-
-    if not market_cap or not avg_volume:
-        return False # Not enough data
-
-    if market_cap < min_market_cap:
-        return False
-
-    if avg_volume < min_avg_volume:
-        return False
-
-    return True
-
 class BaseScenario(ABC):
     def __init__(self, name: str, progress_callback: Callable, is_cancelled_callback: Callable):
         self._name = name
         self.progress_callback = progress_callback
         self.is_cancelled = is_cancelled_callback
 
-    def _get_fundamentals_for_candidate(self, fundamental_data: Dict, stock_info: Dict) -> Dict:
-        if not fundamental_data:
-            return {'name': stock_info.get('shortName', 'N/A')}
-        metrics = fundamental_data.get('metrics', {})
-        return {
-            'name': stock_info.get('shortName', 'N/A'),
-            'sector': stock_info.get('sector', 'N/A'),
-            'trailingPE': metrics.get('pe_ttm'),
-            'earningsGrowth': metrics.get('eps_1y_growth'),
-            'revenueGrowth': metrics.get('revenue_3yr_cagr'),
-            'roe': metrics.get('roe'),
-        }
-
     @abstractmethod
-    def run(self, stock_data: pd.DataFrame, fundamental_data: Dict, stock_info: Dict) -> Optional[ReboundCandidate]:
+    def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
         pass
 
 class GarpTrendScenario(BaseScenario):
-    def run(self, stock_data: pd.DataFrame, fundamental_data: Dict, stock_info: Dict) -> Optional[ReboundCandidate]:
+    def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
         earnings_growth = safe_get(stock_info, 'earningsGrowth')
         pe_ratio = safe_get(stock_info, 'trailingPE')
         if not (earnings_growth is not None and pe_ratio is not None and earnings_growth > 0.10 and 0 < pe_ratio < 25): return None
@@ -134,10 +77,10 @@ class GarpTrendScenario(BaseScenario):
         if pd.isna(latest_price) or pd.isna(sma50) or latest_price <= sma50: return None
         technicals = {'price': round(latest_price, 2), 'sma50': round(sma50, 2)}
         fundamentals = {'earningsGrowth': earnings_growth, 'trailingPE': pe_ratio, 'name': stock_info.get('shortName', 'N/A')}
-        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, technical_score=100, fundamentals=fundamentals, history_df=stock_data, technicals=technicals, rebound_score=0)
+        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self.name, technical_score=100, fundamentals=fundamentals, history_df=stock_data, technicals=technicals, rebound_score=0)
 
 class VolumeBreakoutScenario(BaseScenario):
-    def run(self, stock_data: pd.DataFrame, fundamental_data: Dict, stock_info: Dict) -> Optional[ReboundCandidate]:
+    def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
         high_52w = stock_data['High'].iloc[:-1].max()
         avg_volume_20d = stock_data['Volume'].iloc[-21:-1].mean()
         if pd.isna(high_52w) or pd.isna(avg_volume_20d) or avg_volume_20d == 0: return None
@@ -145,10 +88,11 @@ class VolumeBreakoutScenario(BaseScenario):
         if not (latest_price >= (high_52w * 0.98) and latest_volume > (avg_volume_20d * 1.5)): return None
         volume_ratio = latest_volume / avg_volume_20d
         technicals = {'price': round(latest_price, 2), '52w_high': round(high_52w, 2), 'volume_ratio': round(volume_ratio, 2)}
-        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, technical_score=int(min(100, (volume_ratio / 3.0) * 100)), fundamentals=self._get_fundamentals_for_candidate(fundamental_data, stock_info), history_df=stock_data, technicals=technicals, rebound_score=0)
+        fundamentals = {'name': stock_info.get('shortName', 'N/A')}
+        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self.name, technical_score=int(min(100, (volume_ratio / 3.0) * 100)), fundamentals=fundamentals, history_df=stock_data, technicals=technicals, rebound_score=0)
 
 class StochasticOversoldScenario(BaseScenario):
-    def run(self, stock_data: pd.DataFrame, fundamental_data: Dict, stock_info: Dict) -> Optional[ReboundCandidate]:
+    def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
         stock_data['stoch_k'], stock_data['stoch_d'] = calculate_stochastic(stock_data['High'], stock_data['Low'], stock_data['Close'])
         if 'stoch_k' not in stock_data.columns or 'stoch_d' not in stock_data.columns or len(stock_data) < 2: return None
         k_today, k_yesterday = stock_data['stoch_k'].iloc[-1], stock_data['stoch_k'].iloc[-2]
@@ -156,7 +100,8 @@ class StochasticOversoldScenario(BaseScenario):
         if pd.isna(k_today) or pd.isna(d_today) or pd.isna(k_yesterday) or pd.isna(d_yesterday): return None
         if not (k_yesterday < d_yesterday and k_today > d_today and k_today < 20 and d_today < 20): return None
         technicals = {'price': round(stock_data['Close'].iloc[-1], 2), 'stoch_k': round(k_today, 2), 'stoch_d': round(d_today, 2)}
-        return ReboundCandidate(ticker=stock_info['ticker'], scenario=self.name, technical_score=int(100 - (k_today / 20.0 * 100)), fundamentals=self._get_fundamentals_for_candidate(fundamental_data, stock_info), history_df=stock_data, technicals=technicals, rebound_score=0)
+        fundamentals = {'name': stock_info.get('shortName', 'N/A')}
+        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self.name, technical_score=int(100 - (k_today / 20.0 * 100)), fundamentals=fundamentals, history_df=stock_data, technicals=technicals, rebound_score=0)
 
 # ... (Other existing scenario classes)
 
@@ -200,6 +145,7 @@ class ScenarioRunner:
         total_tickers = len(all_tickers_flat)
         self.telemetry['total_tickers_in_universe'] = total_tickers
 
+        # These now fetch all required data ahead of time
         historical_data_map = await data_loader.get_historical_data_for_tickers(all_tickers_flat, self.progress_callback, self.is_cancelled)
         fundamental_data_map = await self.fundamental_handler.get_fundamentals_for_tickers(all_tickers_flat, self.progress_callback, self.is_cancelled)
 
@@ -209,30 +155,46 @@ class ScenarioRunner:
                 self.telemetry['tickers_processed'] += 1
                 if self.is_cancelled(): break
 
-                stock_info = get_ticker_info_cached(ticker_val)
-                if stock_info is None:
-                    logging.warning(f"Could not retrieve stock info for {ticker_val}, skipping.")
+                # --- Centralized Pre-filtering ---
+                fund_data_packet = fundamental_data_map.get(ticker_val)
+                if not fund_data_packet or 'info' not in fund_data_packet:
                     self.telemetry['tickers_skipped']['total'] += 1
-                    self.telemetry['tickers_skipped']['other'] += 1
+                    self.telemetry['tickers_skipped']['missing_fundamentals'] += 1
                     continue
 
-                if not passes_liquidity_filter(stock_info):
-                    self.telemetry['tickers_skipped']['total'] += 1; self.telemetry['tickers_skipped']['liquidity'] += 1; continue
+                stock_info = fund_data_packet['info']
 
+                # 1. Liquidity Filter
+                min_market_cap = settings.get('min_market_cap')
+                min_avg_volume = settings.get('min_avg_volume_30d')
+                if (stock_info.get('marketCap', 0) or 0) < min_market_cap or \
+                   (stock_info.get('averageVolume', 0) or 0) < min_avg_volume:
+                    self.telemetry['tickers_skipped']['total'] += 1
+                    self.telemetry['tickers_skipped']['liquidity'] += 1
+                    continue
+
+                # 2. Historical Data Filter
                 stock_data = historical_data_map.get(ticker_val)
                 min_history = scenario_params.get('min_history')
                 if stock_data is None or (min_history and len(stock_data) < min_history):
-                    self.telemetry['tickers_skipped']['total'] += 1; self.telemetry['tickers_skipped']['insufficient_history'] += 1; continue
+                    self.telemetry['tickers_skipped']['total'] += 1
+                    self.telemetry['tickers_skipped']['insufficient_history'] += 1
+                    continue
 
+                # 3. Required Info Filter (for specific scenarios)
                 required_info = scenario_params.get('required_info', [])
                 if any(safe_get(stock_info, key) is None for key in required_info):
-                    self.telemetry['tickers_skipped']['total'] += 1; self.telemetry['tickers_skipped']['missing_fundamentals'] += 1; continue
+                    self.telemetry['tickers_skipped']['total'] += 1
+                    self.telemetry['tickers_skipped']['missing_fundamentals'] += 1
+                    continue
 
                 try:
-                    candidate = scenario_instance.run(stock_data, fundamental_data_map.get(ticker_val), stock_info)
+                    # Pass the full info dictionary to the scenario
+                    candidate = scenario_instance.run(stock_data, stock_info)
                     if candidate: all_candidates.append(candidate)
                 except Exception as e:
-                    self.telemetry['tickers_skipped']['total'] += 1; self.telemetry['tickers_skipped']['other'] += 1
+                    self.telemetry['tickers_skipped']['total'] += 1
+                    self.telemetry['tickers_skipped']['other'] += 1
                     logging.error(f"Error processing {ticker_val}: {e}", exc_info=True)
 
         self.telemetry['scan_duration_seconds'] = round(time.time() - start_time, 2)
