@@ -180,6 +180,12 @@ class ScenarioRunner:
                 if self.is_cancelled(): break
 
                 stock_info = get_ticker_info_cached(ticker_val)
+                if stock_info is None:
+                    logging.warning(f"Could not retrieve stock info for {ticker_val}, skipping.")
+                    self.telemetry['tickers_skipped']['total'] += 1
+                    self.telemetry['tickers_skipped']['other'] += 1
+                    continue
+
                 if not passes_liquidity_filter(stock_info):
                     self.telemetry['tickers_skipped']['total'] += 1; self.telemetry['tickers_skipped']['liquidity'] += 1; continue
 
