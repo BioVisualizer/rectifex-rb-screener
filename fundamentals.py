@@ -56,6 +56,10 @@ class FundamentalDataHandler:
 
                 # Basic validation to ensure it's a valid stock
                 if not info or info.get('marketCap') is None:
+                    # Handle cases where yfinance returns a DataFrame for 'info'
+                    if isinstance(info, pd.DataFrame) and info.empty:
+                        logging.warning(f"Empty info DataFrame for {ticker}, skipping.")
+                        return None
                     logging.warning(f"No valid info for {ticker}, skipping.")
                     return None
 

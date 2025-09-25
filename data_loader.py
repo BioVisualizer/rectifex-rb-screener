@@ -70,11 +70,15 @@ def _get_tickers_from_csv(index_details: dict) -> list[str]:
         return []
 
 def _post_process_tickers(tickers: list[str], market: str) -> list[str]:
-    """Applies market-specific transformations to ticker symbols."""
+    """
+    Applies market-specific transformations to ticker symbols, avoiding duplicate suffixes.
+    """
     if market == 'DE':
-        return [f"{t}.DE" if not t.endswith('.DE') else t for t in tickers]
+        # Only add .DE if it's not there and no other suffix exists
+        return [f"{t}.DE" if '.' not in t else t for t in tickers]
     if market == 'JP':
-        return [f"{t}.T" if not t.endswith('.T') else t for t in tickers]
+        # Only add .T if it's not there and no other suffix exists
+        return [f"{t}.T" if '.' not in t else t for t in tickers]
     return tickers
 
 def _get_tickers_from_user_csv(index_name: str) -> list[str] | None:
