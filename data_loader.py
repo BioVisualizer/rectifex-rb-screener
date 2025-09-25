@@ -97,16 +97,27 @@ def _get_tickers_from_user_csv(index_name: str) -> list[str] | None:
 
 def get_ticker_list(index_name: str) -> list[str]:
     """
-    Gets the list of constituent tickers for a given index.
+    Gets the list of constituent tickers for a given index, with robust fallbacks.
     """
     index_details = config.INDICES.get(index_name)
     if not index_details:
         return []
+
+    # First, try to load a user-defined list
     tickers = _get_tickers_from_user_csv(index_name)
-    if tickers is None:
+
+    # If the user list is not present or empty, try scraping Wikipedia
+    if not tickers:
         tickers = _get_tickers_from_wiki(index_details)
-    if tickers is None:
+
+    # If scraping fails or returns an empty list, use the local fallback CSV
+    if not tickers:
         tickers = _get_tickers_from_csv(index_details)
+
+    # Ensure tickers is a list before post-processing to avoid errors
+    if not tickers:
+        return []
+
     return _post_process_tickers(tickers, index_details['market'])
 
 def get_master_ticker_list() -> list[str] | None:

@@ -43,42 +43,34 @@ class FundamentalDataHandler:
         except Exception as e:
             logging.error(f"Failed to save fundamental cache for {ticker}. Error: {e}")
 
-    def _calculate_metrics(self, stock: yf.Ticker) -> Optional[Dict[str, Any]]:
-        info = stock.info
-        if not info or info.get('marketCap') is None: return None
-        try:
-            metrics = {
-                'revenue_3yr_cagr': info.get('revenueGrowth'),
-                'eps_1y_growth': info.get('earningsGrowth'),
-                'net_margin': info.get('profitMargins'),
-                'roe': info.get('returnOnEquity'),
-                'debt_equity': info.get('debtToEquity'),
-                'pe_ttm': info.get('trailingPE'),
-                'payout_ratio': info.get('payoutRatio')
-            }
-            if metrics['debt_equity'] is not None and metrics['debt_equity'] > 10:
-                metrics['debt_equity'] /= 100.0
-            for key, value in metrics.items():
-                if isinstance(value, (np.generic, np.number)): metrics[key] = value.item()
-                elif pd.isna(value): metrics[key] = None
-            return metrics
-        except Exception as e:
-            logging.warning(f"Could not compute all metrics for {stock.ticker}. Error: {e}")
-            return None
-
     async def _fetch_single_ticker(self, ticker: str) -> Optional[Dict[str, Any]]:
         max_retries = 3
         base_wait_time = 2
         for attempt in range(max_retries):
             try:
                 stock = await asyncio.to_thread(yf.Ticker, ticker, session=self.session)
-                metrics = await asyncio.to_thread(self._calculate_metrics, stock)
-                if not metrics: return None
+                # Fetch the full info dictionary
+                info = await asyncio.to_thread(lambda: stock.info)
+
+                # Basic validation to ensure it's a valid stock
+                if not info or info.get('marketCap') is None:
+                    logging.warning(f"No valid info for {ticker}, skipping.")
+                    return None
+
+                # Create a serializable copy of the info dict to handle numpy types
+                serializable_info = {}
+                for key, value in info.items():
+                    if isinstance(value, (np.generic, np.number)):
+                        serializable_info[key] = value.item()
+                    elif pd.isna(value):
+                        serializable_info[key] = None
+                    else:
+                        serializable_info[key] = value
+
                 data_packet = {
                     "ticker": stock.ticker,
                     "last_update": datetime.now(timezone.utc).isoformat(),
-                    "sector": stock.info.get('sector', 'N/A'),
-                    "metrics": metrics
+                    "info": serializable_info  # Cache the whole info dict
                 }
                 self._save_to_cache(ticker, data_packet)
                 return data_packet
