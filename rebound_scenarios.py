@@ -74,7 +74,7 @@ class BaseScenario(ABC):
 
 class ClassicOversoldScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
-        params = config.INDICES.get(self.name, {}).get('params', {"rsi_threshold": 30, "sma200_dist_pct": 5, "low90_dist_pct": 3})
+        params = settings.get('classic_oversold_params', {"rsi_threshold": 30, "sma200_dist_pct": 5, "low90_dist_pct": 3})
         stock_data['rsi'] = calculate_rsi(stock_data['Close'])
         stock_data['sma200'] = calculate_sma(stock_data['Close'], 200)
         if len(stock_data) < 90 or 'sma200' not in stock_data.columns or stock_data['sma200'].isnull().all(): return None
@@ -93,8 +93,34 @@ class ClassicOversoldScenario(BaseScenario):
 
 class FloorConsolidationScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
-        # This is a complex scenario. Using placeholder logic for now.
-        return None
+        lookback = settings.get('fc_crash_lookback_period')
+        min_depth = settings.get('fc_min_crash_depth')
+        consol_days = settings.get('fc_consolidation_period_days')
+        max_range = settings.get('fc_max_consolidation_range')
+
+        if len(stock_data) < lookback: return None
+
+        lookback_data = stock_data.iloc[-lookback:]
+        peak_idx = lookback_data['High'].idxmax()
+        peak_price = lookback_data['High'].max()
+
+        data_after_peak = lookback_data.loc[peak_idx:]
+        if len(data_after_peak) < consol_days: return None
+
+        trough_price = data_after_peak['Low'].min()
+
+        if (peak_price - trough_price) / peak_price < min_depth: return None
+
+        consol_data = data_after_peak.iloc[-consol_days:]
+        consol_low = consol_data['Low'].min()
+        consol_high = consol_data['High'].max()
+
+        if (consol_high - consol_low) / consol_low > max_range: return None
+
+        technicals = {'price': stock_data['Close'].iloc[-1], 'Crash %': f"{(peak_price - trough_price) / peak_price:.1%}", 'Consol. Range %': f"{(consol_high - consol_low) / consol_low:.1%}"}
+        fundamentals = {'name': stock_info.get('shortName', 'N/A')}
+        score = compute_floor_score(technicals)
+        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self.name, technical_score=score, fundamentals=fundamentals, history_df=stock_data, technicals=technicals)
 
 class MeanReversionScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
@@ -134,8 +160,7 @@ class GoldenCrossScenario(BaseScenario):
         sma50_yesterday = stock_data['sma50'].iloc[-2]
         sma200_yesterday = stock_data['sma200'].iloc[-2]
 
-        if not (sma50_yesterday < sma200_yesterday and sma50_today > sma200_today):
-            return None
+        if not (sma50_yesterday < sma200_yesterday and sma50_today > sma200_today): return None
 
         technicals = {'price': stock_data['Close'].iloc[-1], 'sma50': sma50_today, 'sma200': sma200_today}
         fundamentals = {'name': stock_info.get('shortName', 'N/A')}
@@ -143,7 +168,7 @@ class GoldenCrossScenario(BaseScenario):
 
 class QualityPullbackScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
-        params = config.INDICES.get(self.name, {}).get('params', {"sma50_proximity_pct": 3})
+        params = settings.get('quality_pullback_params', {"sma50_proximity_pct": 3})
         if len(stock_data) < 200: return None
         stock_data['sma50'] = calculate_sma(stock_data['Close'], 50)
         stock_data['sma200'] = calculate_sma(stock_data['Close'], 200)
@@ -168,7 +193,7 @@ class FundamentalDivergenceScenario(BaseScenario):
 
 class VolatilitySqueezeScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
-        params = config.INDICES.get(self.name, {}).get('params', {"bbw_percentile": 10})
+        params = settings.get('volatility_squeeze_params', {"bbw_percentile": 10})
         if len(stock_data) < 20: return None
         upper, middle, lower = calculate_bollinger_bands(stock_data['Close'])
         if upper.isnull().all(): return None
@@ -182,7 +207,7 @@ class VolatilitySqueezeScenario(BaseScenario):
 
 class HighQualityDividendScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
-        params = config.INDICES.get(self.name, {}).get('params', {"min_yield": 0.03, "max_payout_ratio": 0.7, "max_debt_equity": 1.0})
+        params = settings.get('high_quality_dividend_params', {"min_yield": 0.03, "max_payout_ratio": 0.7, "max_debt_equity": 1.0})
 
         div_yield = safe_get(stock_info, 'dividendYield')
         payout_ratio = safe_get(stock_info, 'payoutRatio')
@@ -261,17 +286,14 @@ class ScenarioRunner:
     def __init__(self, progress_callback: Callable = None, progress_percent_callback: Callable = None, is_cancelled_callback: Callable = None):
         self.progress_callback = progress_callback
         self.progress_percent_callback = progress_percent_callback
-        self._is_cancelled_cb = is_cancelled_callback or (lambda: False)
-        self._is_cancelled = False
+        self.is_cancelled_callback = is_cancelled_callback or (lambda: False)
         self.scenarios_config = self.load_scenarios_config()
         self.fundamental_handler = FundamentalDataHandler()
         self.telemetry = {"scan_duration_seconds": 0, "total_tickers_in_universe": 0, "tickers_processed": 0, "tickers_skipped": {"total": 0, "missing_fundamentals": 0, "insufficient_history": 0, "liquidity": 0, "other": 0}}
 
-    def is_cancelled(self):
-        return self._is_cancelled or self._is_cancelled_cb()
-
     def cancel(self):
-        self._is_cancelled = True
+        """Allows the AnalysisWorker to signal cancellation."""
+        self.is_cancelled_callback = lambda: True
 
     def _get_scenario_instance(self, scenario_id: str) -> Optional[BaseScenario]:
         scenario_config = next((s for s in self.scenarios_config if s['id'] == scenario_id), None)
@@ -283,7 +305,7 @@ class ScenarioRunner:
         if not ScenarioClass:
             if self.progress_callback: self.progress_callback.emit(f"Error: Scenario class '{class_name}' not implemented.")
             return None
-        return ScenarioClass(name=scenario_config['name'], progress_callback=self.progress_callback, is_cancelled_callback=self.is_cancelled)
+        return ScenarioClass(name=scenario_config['name'], progress_callback=self.progress_callback, is_cancelled_callback=self.is_cancelled_callback)
 
     async def run_scan(self, scenario_id: str, ticker: str = None) -> List[ReboundCandidate]:
         start_time = time.time()
@@ -297,12 +319,12 @@ class ScenarioRunner:
         total_tickers = len(all_tickers_flat)
         self.telemetry['total_tickers_in_universe'] = total_tickers
 
-        historical_data_map = await data_loader.get_historical_data_for_tickers(all_tickers_flat, self.progress_callback, self.is_cancelled)
-        fundamental_data_map = await self.fundamental_handler.get_fundamentals_for_tickers(all_tickers_flat, self.progress_callback, self.is_cancelled)
+        historical_data_map = await data_loader.get_historical_data_for_tickers(all_tickers_flat, self.progress_callback, self.is_cancelled_callback)
+        fundamental_data_map = await self.fundamental_handler.get_fundamentals_for_tickers(all_tickers_flat, self.progress_callback, self.is_cancelled_callback)
 
         all_candidates = []
         for i, ticker_val in enumerate(all_tickers_flat):
-            if self.is_cancelled(): break
+            if self.is_cancelled_callback(): break
 
             if self.progress_percent_callback:
                 self.progress_percent_callback.emit(int((i + 1) / total_tickers * 100))
