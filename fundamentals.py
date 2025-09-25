@@ -54,13 +54,11 @@ class FundamentalDataHandler:
                 # Fetch the full info dictionary
                 info = await asyncio.to_thread(lambda: stock.info)
 
-                # Basic validation to ensure it's a valid stock
-                if not info or info.get('marketCap') is None:
-                    # Handle cases where yfinance returns a DataFrame for 'info'
-                    if isinstance(info, pd.DataFrame) and info.empty:
-                        logging.warning(f"Empty info DataFrame for {ticker}, skipping.")
-                        return None
-                    logging.warning(f"No valid info for {ticker}, skipping.")
+                # Basic validation to ensure it's a valid stock.
+                # The main filtering logic in the ScenarioRunner is more robust
+                # and will handle missing individual fields.
+                if not info:
+                    logging.warning(f"No info dictionary returned for {ticker}, skipping.")
                     return None
 
                 # Create a serializable copy of the info dict to handle numpy types
