@@ -52,6 +52,11 @@ class AnalysisWorker(QObject):
         self.selected_scenario = selected_scenario
         self.ticker = ticker
         self._is_cancelled = False
+        self.runner = ScenarioRunner(
+            progress_callback=self.signals.progress,
+            progress_percent_callback=self.signals.progress_percent,
+            is_cancelled_callback=lambda: self._is_cancelled
+        )
 
     def cancel(self):
         """Sets the cancellation flag to True."""
@@ -66,6 +71,16 @@ class AnalysisWorker(QObject):
                 progress_percent_callback=self.signals.progress_percent,
                 is_cancelled_callback=lambda: self._is_cancelled
             )
+    def cancel(self): self._is_cancelled = True
+    def run(self):
+        try:
+            results = asyncio.run(self.runner.run_scan(self.selected_scenario, ticker=self.ticker))
+            self.signals.result.emit(results, self.runner.telemetry)
+        except Exception as e:
+            import traceback
+            self.signals.error.emit((type(e), e, traceback.format_exc()))
+        finally:
+            self.signals.finished.emit()
 
             # Run the selected scenario using the new generic method
             results = asyncio.run(runner.run_scan(self.selected_scenario, ticker=self.ticker))
