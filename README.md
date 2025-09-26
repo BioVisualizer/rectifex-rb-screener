@@ -78,6 +78,7 @@ From the project's root directory (where `flathub.json` is located), run the bui
 ```bash
 flatpak-builder build-dir flathub.json --user --install --force-clean
 ```
+**Note:** The `--user` flag installs the application for your local user account, so you do not need to manually specify a username.
 
 ### 4. Run the Application
 After installation, find "Rectifex RB" in your application menu or run it from the command line:
