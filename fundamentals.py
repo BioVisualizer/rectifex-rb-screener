@@ -83,7 +83,7 @@ class FundamentalDataHandler:
                 return data_packet
             except Exception as e:
                 # This specific yfinance error is not transient, so we shouldn't retry.
-                if isinstance(e, ValueError) and "The truth value of an empty array is ambiguous" in str(e):
+                if isinstance(e, ValueError) and "The truth value of an" in str(e) and "is ambiguous" in str(e):
                     logging.warning(f"Skipping {ticker} due to a yfinance internal data error: {e}")
                     return None
 
