@@ -8,6 +8,8 @@ from typing import List, Dict, Any, Callable, Optional
 import json
 from abc import ABC, abstractmethod
 import time
+import asyncio
+import functools
 
 # App-specific imports
 import config
@@ -295,6 +297,59 @@ class ScenarioRunner:
         """Allows the AnalysisWorker to signal cancellation."""
         self.is_cancelled_callback = lambda: True
 
+    async def _validate_ticker_list(self, tickers: List[str]) -> List[str]:
+        """
+        Performs a quick validation on a list of tickers to see if they return any data.
+        This is a pre-filtering step to avoid wasting time on delisted/invalid tickers.
+        """
+        if not tickers:
+            return []
+
+        if self.progress_callback:
+            self.progress_callback.emit("Validating ticker universe...")
+
+        validated_tickers = []
+        total_tickers = len(tickers)
+
+        async def check_ticker(ticker, semaphore):
+            async with semaphore:
+                if self.is_cancelled_callback():
+                    return None
+                # Use a short period and fewer retries for a quick check.
+                df = await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    functools.partial(data_loader.fetch_history, ticker=ticker, period="1mo", retries=1)
+                )
+                return ticker if df is not None and not df.empty else None
+
+        semaphore = asyncio.Semaphore(20)  # Use higher concurrency for these quick checks
+        tasks = [check_ticker(t, semaphore) for t in tickers]
+
+        processed_count = 0
+        for future in asyncio.as_completed(tasks):
+            if self.is_cancelled_callback():
+                break
+            result = await future
+            if result:
+                validated_tickers.append(result)
+
+            processed_count += 1
+            if self.progress_percent_callback:
+                # We can allocate, say, the first 30% of the progress bar to validation
+                progress_pct = int((processed_count / total_tickers) * 30)
+                self.progress_percent_callback.emit(progress_pct)
+
+            if self.progress_callback:
+                 self.progress_callback.emit(f"Validating tickers ({processed_count}/{total_tickers})...")
+
+        num_valid = len(validated_tickers)
+        if total_tickers > 0:
+            valid_pct = (num_valid / total_tickers) * 100
+            if self.progress_callback:
+                self.progress_callback.emit(f"Validation complete. Found {num_valid}/{total_tickers} ({valid_pct:.1f}%) valid tickers.")
+
+        return validated_tickers
+
     def _get_scenario_instance(self, scenario_id: str) -> Optional[BaseScenario]:
         scenario_config = next((s for s in self.scenarios_config if s['id'] == scenario_id), None)
         if not scenario_config:
@@ -316,18 +371,33 @@ class ScenarioRunner:
 
         all_tickers_by_market = {"CUSTOM": [ticker]} if ticker else data_loader.get_all_tickers()
         all_tickers_flat = [t for sublist in all_tickers_by_market.values() for t in sublist]
-        total_tickers = len(all_tickers_flat)
-        self.telemetry['total_tickers_in_universe'] = total_tickers
+        self.telemetry['total_tickers_in_universe'] = len(all_tickers_flat)
 
-        historical_data_map = await data_loader.get_historical_data_for_tickers(all_tickers_flat, self.progress_callback, self.is_cancelled_callback)
-        fundamental_data_map = await self.fundamental_handler.get_fundamentals_for_tickers(all_tickers_flat, self.progress_callback, self.is_cancelled_callback)
+        # --- Pre-scan validation ---
+        valid_tickers = await self._validate_ticker_list(all_tickers_flat)
+        if self.is_cancelled_callback(): return []
+
+        total_tickers_to_scan = len(valid_tickers)
+        if total_tickers_to_scan == 0:
+            if self.progress_callback: self.progress_callback.emit("No valid tickers found to scan.")
+            self.telemetry['scan_duration_seconds'] = round(time.time() - start_time, 2)
+            return []
+        # --- End validation ---
+
+        historical_data_map = await data_loader.get_historical_data_for_tickers(valid_tickers, self.progress_callback, self.is_cancelled_callback)
+        fundamental_data_map = await self.fundamental_handler.get_fundamentals_for_tickers(valid_tickers, self.progress_callback, self.is_cancelled_callback)
 
         all_candidates = []
-        for i, ticker_val in enumerate(all_tickers_flat):
+        for i, ticker_val in enumerate(valid_tickers):
             if self.is_cancelled_callback(): break
 
+            if self.progress_callback:
+                self.progress_callback.emit(f"Analyzing {i + 1}/{total_tickers_to_scan}: {ticker_val}")
+
             if self.progress_percent_callback:
-                self.progress_percent_callback.emit(int((i + 1) / total_tickers * 100))
+                # Validation uses 0-30%, so scanning uses 30-100% of the progress bar
+                progress_pct = 30 + int((i + 1) / total_tickers_to_scan * 70)
+                self.progress_percent_callback.emit(progress_pct)
 
             self.telemetry['tickers_processed'] += 1
 

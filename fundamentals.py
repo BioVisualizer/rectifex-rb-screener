@@ -12,8 +12,47 @@ import yfinance as yf
 # from curl_cffi.requests import AsyncSession # This was causing issues
 
 import config
+import time
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+def _fetch_single_ticker_fundamentals_sync(ticker: str) -> Optional[Dict[str, Any]]:
+    """
+    Synchronously fetches and processes fundamental data for a single stock
+    with retries and robust error handling.
+    """
+    max_retries = 3
+    base_wait_time = 2
+    for attempt in range(max_retries):
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+
+            if not isinstance(info, dict) or not info:
+                logger.warning(f"No valid info dictionary returned for {ticker}, skipping.")
+                return None
+
+            serializable_info = {
+                key: value.item() if isinstance(value, (np.generic, np.number)) else
+                     None if pd.isna(value) else
+                     value
+                for key, value in info.items()
+            }
+            return serializable_info
+
+        except Exception as e:
+            if isinstance(e, ValueError) and "The truth value of an" in str(e) and "is ambiguous" in str(e):
+                logger.warning(f"Skipping {ticker} due to a yfinance internal data error: {e}")
+                return None
+
+            logger.warning(f"Attempt {attempt + 1} for {ticker} fundamentals failed: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(base_wait_time * (2 ** attempt) + random.uniform(0, 1))
+            else:
+                logger.error(f"All attempts to fetch fundamentals for {ticker} failed.")
+    return None
+
 
 CACHE_DIR = Path.home() / ".local" / "share" / "rectifex" / "cache"
 FUNDAMENTALS_DIR = CACHE_DIR / "fundamentals"
@@ -45,52 +84,20 @@ class FundamentalDataHandler:
             logging.error(f"Failed to save fundamental cache for {ticker}. Error: {e}")
 
     async def _fetch_single_ticker(self, ticker: str) -> Optional[Dict[str, Any]]:
-        max_retries = 3
-        base_wait_time = 2
-        for attempt in range(max_retries):
-            try:
-                # Let yfinance handle its own session
-                stock = await asyncio.to_thread(yf.Ticker, ticker)
-                # Fetch the full info dictionary
-                info = await asyncio.to_thread(lambda: stock.info)
+        """
+        Asynchronously fetches fundamental data using the robust synchronous wrapper.
+        """
+        loop = asyncio.get_running_loop()
+        info = await loop.run_in_executor(None, _fetch_single_ticker_fundamentals_sync, ticker)
 
-                # Handle cases where yfinance returns an empty DataFrame instead of a dict
-                if isinstance(info, pd.DataFrame):
-                    logging.warning(f"Received DataFrame instead of dict for {ticker} info, skipping.")
-                    return None
-
-                # Basic validation to ensure it's a valid stock.
-                if not info:
-                    logging.warning(f"No info dictionary returned for {ticker}, skipping.")
-                    return None
-
-                # Create a serializable copy of the info dict to handle numpy types
-                serializable_info = {}
-                for key, value in info.items():
-                    if isinstance(value, (np.generic, np.number)):
-                        serializable_info[key] = value.item()
-                    elif pd.isna(value):
-                        serializable_info[key] = None
-                    else:
-                        serializable_info[key] = value
-
-                data_packet = {
-                    "ticker": stock.ticker,
-                    "last_update": datetime.now(timezone.utc).isoformat(),
-                    "info": serializable_info  # Cache the whole info dict
-                }
-                self._save_to_cache(ticker, data_packet)
-                return data_packet
-            except Exception as e:
-                # This specific yfinance error is not transient, so we shouldn't retry.
-                if isinstance(e, ValueError) and "The truth value of an" in str(e) and "is ambiguous" in str(e):
-                    logging.warning(f"Skipping {ticker} due to a yfinance internal data error: {e}")
-                    return None
-
-                logging.warning(f"Attempt {attempt + 1} for {ticker} failed: {e}")
-                if attempt < max_retries - 1:
-                    wait_time = base_wait_time * (2 ** attempt) + random.uniform(0, 1)
-                    await asyncio.sleep(wait_time)
+        if info:
+            data_packet = {
+                "ticker": ticker,
+                "last_update": datetime.now(timezone.utc).isoformat(),
+                "info": info
+            }
+            self._save_to_cache(ticker, data_packet)
+            return data_packet
         return None
 
     async def get_fundamentals_for_tickers(self, tickers: List[str],
@@ -129,10 +136,10 @@ class FundamentalDataHandler:
         pass
 
     async def get_full_ticker_info(self, ticker: str) -> Optional[Dict[str, Any]]:
-        try:
-            # Let yfinance handle its own session
-            stock = await asyncio.to_thread(yf.Ticker, ticker)
-            return await asyncio.to_thread(lambda: stock.info)
-        except Exception as e:
-            logging.error(f"Failed to fetch full info for {ticker}: {e}")
-            return None
+        """
+        Asynchronously fetches the full, raw fundamental data for a single ticker
+        using the robust synchronous wrapper.
+        """
+        loop = asyncio.get_running_loop()
+        info = await loop.run_in_executor(None, _fetch_single_ticker_fundamentals_sync, ticker)
+        return info
