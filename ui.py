@@ -1478,16 +1478,39 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
 
     def update_status_text(self, message: str):
-        """Updates the text in the status bar and the progress label."""
+        """Updates the text in the status bar and the progress label with stage and counts."""
         self.status_bar.showMessage(message)
-        # Live-update the progress label with skipped ticker counts
-        if hasattr(self, 'worker') and self.worker:
+
+        # Determine the current stage from the message
+        stage_text = ""
+        if "Validating" in message:
+            stage_text = "Stage 1/3: Validating Tickers..."
+        elif "Fetched" in message or "Loaded" in message:
+            stage_text = "Stage 2/3: Fetching Data..."
+        elif "Analyzing" in message:
+            stage_text = "Stage 3/3: Analyzing Tickers..."
+
+        # Get the latest telemetry data for progress counters
+        telemetry_text = ""
+        if hasattr(self, 'worker') and self.worker and hasattr(self.worker, 'runner'):
             telemetry = self.worker.runner.telemetry
-            skipped_count = telemetry['tickers_skipped']['total']
-            processed_count = telemetry['tickers_processed']
-            self.scan_progress_label.setText(f"Processed: {processed_count} | Skipped: {skipped_count}")
-        else:
-            self.scan_progress_label.setText(message)
+            # The number of tickers skipped during validation is the total universe minus the number processed in the final stage
+            total_in_universe = telemetry.get('total_tickers_in_universe', 0)
+            processed_count = telemetry.get('tickers_processed', 0)
+
+            # During validation, "skipped" isn't meaningful yet.
+            if "Validating" in message:
+                 import re
+                 match = re.search(r"\((\d+/\d+)\)", message)
+                 if match:
+                     telemetry_text = f"({match.group(1)})"
+            else: # During analysis, we can show processed/skipped
+                skipped_during_analysis = telemetry['tickers_skipped']['total']
+                telemetry_text = f"Processed: {processed_count} | Skipped: {skipped_during_analysis}"
+
+        # Combine the stage and telemetry text
+        final_text = f"{stage_text} {telemetry_text}".strip()
+        self.scan_progress_label.setText(final_text)
 
     def update_progress_bar(self, percent):
         """Updates the progress bar value."""
