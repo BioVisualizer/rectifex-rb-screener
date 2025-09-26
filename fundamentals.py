@@ -17,38 +17,61 @@ import time
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def _fetch_single_ticker_fundamentals_sync(ticker: str) -> Optional[Dict[str, Any]]:
+async def _fetch_single_ticker_fundamentals(ticker: str) -> Optional[Dict[str, Any]]:
     """
-    Synchronously fetches and processes fundamental data for a single stock
+    Asynchronously fetches and processes fundamental data for a single stock
     with retries and robust error handling.
     """
+    loop = asyncio.get_running_loop()
     max_retries = 3
     base_wait_time = 2
     for attempt in range(max_retries):
         try:
-            stock = yf.Ticker(ticker)
-            info = stock.info
+            # yf.Ticker and .info are blocking calls, run in executor
+            stock = await loop.run_in_executor(None, yf.Ticker, ticker)
+            info = await loop.run_in_executor(None, getattr, stock, 'info')
 
             if not isinstance(info, dict) or not info:
                 logger.warning(f"No valid info dictionary returned for {ticker}, skipping.")
                 return None
 
-            serializable_info = {
-                key: value.item() if isinstance(value, (np.generic, np.number)) else
-                     None if pd.isna(value) else
-                     value
-                for key, value in info.items()
-            }
+            # Process the info dict to make it serializable and handle numpy arrays/series
+            serializable_info = {}
+            for key, value in info.items():
+                # 1. Handle array-like types first to avoid ambiguous truth checks later.
+                if isinstance(value, (np.ndarray, pd.Series)):
+                    serializable_info[key] = value.tolist() if value.size > 0 else None
+                    continue
+
+                # 2. Handle numpy/pandas numeric types.
+                if isinstance(value, (np.generic, np.number)):
+                    serializable_info[key] = value.item()
+                    continue
+
+                # 3. Now it should be safe to check for NaN on scalar values.
+                # This also handles Python's `None`.
+                try:
+                    if pd.isna(value):
+                        serializable_info[key] = None
+                        continue
+                except (TypeError, ValueError):
+                    # This can happen for unsupported types in pd.isna, just pass them through
+                    pass
+
+                # 4. If none of the above, assume the value is already serializable.
+                serializable_info[key] = value
             return serializable_info
 
         except Exception as e:
+            # Handle non-transient yfinance errors without retrying
             if isinstance(e, ValueError) and "The truth value of an" in str(e) and "is ambiguous" in str(e):
-                logger.warning(f"Skipping {ticker} due to a yfinance internal data error: {e}")
+                logger.warning(f"Skipping {ticker} due to yfinance internal data error: {e}")
                 return None
 
             logger.warning(f"Attempt {attempt + 1} for {ticker} fundamentals failed: {e}")
             if attempt < max_retries - 1:
-                time.sleep(base_wait_time * (2 ** attempt) + random.uniform(0, 1))
+                wait_time = base_wait_time * (2 ** attempt) + random.uniform(0, 1)
+                await asyncio.sleep(wait_time)  # Use non-blocking sleep
             else:
                 logger.error(f"All attempts to fetch fundamentals for {ticker} failed.")
     return None
@@ -85,10 +108,9 @@ class FundamentalDataHandler:
 
     async def _fetch_single_ticker(self, ticker: str) -> Optional[Dict[str, Any]]:
         """
-        Asynchronously fetches fundamental data using the robust synchronous wrapper.
+        Asynchronously fetches fundamental data using the robust asynchronous wrapper.
         """
-        loop = asyncio.get_running_loop()
-        info = await loop.run_in_executor(None, _fetch_single_ticker_fundamentals_sync, ticker)
+        info = await _fetch_single_ticker_fundamentals(ticker)
 
         if info:
             data_packet = {
@@ -138,8 +160,6 @@ class FundamentalDataHandler:
     async def get_full_ticker_info(self, ticker: str) -> Optional[Dict[str, Any]]:
         """
         Asynchronously fetches the full, raw fundamental data for a single ticker
-        using the robust synchronous wrapper.
+        using the robust asynchronous wrapper.
         """
-        loop = asyncio.get_running_loop()
-        info = await loop.run_in_executor(None, _fetch_single_ticker_fundamentals_sync, ticker)
-        return info
+        return await _fetch_single_ticker_fundamentals(ticker)
