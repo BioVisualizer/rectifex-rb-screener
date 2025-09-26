@@ -282,10 +282,8 @@ async def get_historical_data_for_tickers(
             ticker, data = await future
             if data is not None: results[ticker] = data
             fetched_count += 1
-            if progress_callback:
-                progress_callback.emit(f"Fetched historical data for {ticker} ({fetched_count}/{len(tickers_to_fetch)})")
-        except asyncio.CancelledError:
-            pass
+            if progress_callback: progress_callback.emit(f"Fetched historical data for {ticker} ({fetched_count}/{len(tickers_to_fetch)})")
+        except asyncio.CancelledError: pass
     return results
 
 async def get_stock_data(ticker: str) -> pd.DataFrame | None:
