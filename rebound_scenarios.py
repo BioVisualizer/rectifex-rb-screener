@@ -91,7 +91,7 @@ class ClassicOversoldScenario(BaseScenario):
         technicals = {'price': latest_price, 'rsi': round(stock_data['rsi'].iloc[-1], 2)}
         fundamentals = {'name': stock_info.get('shortName', 'N/A')}
         score = 100 - stock_data['rsi'].iloc[-1]
-        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self.name, technical_score=score, fundamentals=fundamentals, history_df=stock_data, technicals=technicals)
+        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self._name, technical_score=score, fundamentals=fundamentals, history_df=stock_data, technicals=technicals, rebound_score=score)
 
 class FloorConsolidationScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
@@ -196,7 +196,7 @@ class MeanReversionScenario(BaseScenario):
 
         technicals = {'price': latest_price, 'lower_bb': lower_band}
         fundamentals = {'name': stock_info.get('shortName', 'N/A')}
-        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self.name, technical_score=75, fundamentals=fundamentals, history_df=stock_data, technicals=technicals)
+        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self._name, technical_score=75, fundamentals=fundamentals, history_df=stock_data, technicals=technicals, rebound_score=75)
 
 class MomentumBreakoutScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
@@ -207,7 +207,7 @@ class MomentumBreakoutScenario(BaseScenario):
 
         technicals = {'price': latest_price, '52w_high': high_52w}
         fundamentals = {'name': stock_info.get('shortName', 'N/A')}
-        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self.name, technical_score=85, fundamentals=fundamentals, history_df=stock_data, technicals=technicals)
+        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self._name, technical_score=85, fundamentals=fundamentals, history_df=stock_data, technicals=technicals, rebound_score=85)
 
 class GoldenCrossScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
@@ -225,7 +225,7 @@ class GoldenCrossScenario(BaseScenario):
 
         technicals = {'price': stock_data['Close'].iloc[-1], 'sma50': sma50_today, 'sma200': sma200_today}
         fundamentals = {'name': stock_info.get('shortName', 'N/A')}
-        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self.name, technical_score=90, fundamentals=fundamentals, history_df=stock_data, technicals=technicals)
+        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self._name, technical_score=90, fundamentals=fundamentals, history_df=stock_data, technicals=technicals, rebound_score=90)
 
 class QualityPullbackScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
@@ -245,7 +245,7 @@ class QualityPullbackScenario(BaseScenario):
 
         technicals = {'price': latest_price, 'sma50': sma50}
         fundamentals = {'name': stock_info.get('shortName', 'N/A')}
-        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self.name, technical_score=80, fundamentals=fundamentals, history_df=stock_data, technicals=technicals)
+        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self._name, technical_score=80, fundamentals=fundamentals, history_df=stock_data, technicals=technicals, rebound_score=80)
 
 class FundamentalDivergenceScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
@@ -263,7 +263,7 @@ class VolatilitySqueezeScenario(BaseScenario):
         if bb_width.iloc[-1] < bb_width.quantile(params['bbw_percentile'] / 100):
             technicals = {'price': stock_data['Close'].iloc[-1], 'bb_width': bb_width.iloc[-1]}
             fundamentals = {'name': stock_info.get('shortName', 'N/A')}
-            return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self.name, technical_score=70, fundamentals=fundamentals, history_df=stock_data, technicals=technicals)
+            return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self._name, technical_score=70, fundamentals=fundamentals, history_df=stock_data, technicals=technicals, rebound_score=70)
         return None
 
 class HighQualityDividendScenario(BaseScenario):
@@ -281,7 +281,7 @@ class HighQualityDividendScenario(BaseScenario):
 
         technicals = {'price': stock_data['Close'].iloc[-1]}
         fundamentals = {'name': stock_info.get('shortName', 'N/A'), 'dividendYield': div_yield}
-        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self.name, technical_score=88, fundamentals=fundamentals, history_df=stock_data, technicals=technicals)
+        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self._name, technical_score=88, fundamentals=fundamentals, history_df=stock_data, technicals=technicals, rebound_score=88)
 
 class GarpTrendScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
@@ -294,7 +294,7 @@ class GarpTrendScenario(BaseScenario):
         if pd.isna(latest_price) or pd.isna(sma50) or latest_price <= sma50: return None
         technicals = {'price': round(latest_price, 2), 'sma50': round(sma50, 2)}
         fundamentals = {'earningsGrowth': earnings_growth, 'trailingPE': pe_ratio, 'name': stock_info.get('shortName', 'N/A')}
-        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self.name, technical_score=100, fundamentals=fundamentals, history_df=stock_data, technicals=technicals, rebound_score=0)
+        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self._name, technical_score=100, fundamentals=fundamentals, history_df=stock_data, technicals=technicals, rebound_score=100)
 
 class VolumeBreakoutScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
@@ -307,7 +307,8 @@ class VolumeBreakoutScenario(BaseScenario):
         volume_ratio = latest_volume / avg_volume_20d
         technicals = {'price': round(latest_price, 2), '52w_high': round(high_52w, 2), 'volume_ratio': round(volume_ratio, 2)}
         fundamentals = {'name': stock_info.get('shortName', 'N/A')}
-        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self.name, technical_score=int(min(100, (volume_ratio / 3.0) * 100)), fundamentals=fundamentals, history_df=stock_data, technicals=technicals, rebound_score=0)
+        score = int(min(100, (volume_ratio / 3.0) * 100))
+        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self._name, technical_score=score, fundamentals=fundamentals, history_df=stock_data, technicals=technicals, rebound_score=score)
 
 class StochasticOversoldScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
@@ -319,7 +320,8 @@ class StochasticOversoldScenario(BaseScenario):
         if not (k_yesterday < d_yesterday and k_today > d_today and k_today < 20 and d_today < 20): return None
         technicals = {'price': round(stock_data['Close'].iloc[-1], 2), 'stoch_k': round(k_today, 2), 'stoch_d': round(d_today, 2)}
         fundamentals = {'name': stock_info.get('shortName', 'N/A')}
-        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self.name, technical_score=int(100 - (k_today / 20.0 * 100)), fundamentals=fundamentals, history_df=stock_data, technicals=technicals, rebound_score=0)
+        score = int(100 - (k_today / 20.0 * 100))
+        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self._name, technical_score=score, fundamentals=fundamentals, history_df=stock_data, technicals=technicals, rebound_score=score)
 
 
 class ScenarioRunner:
