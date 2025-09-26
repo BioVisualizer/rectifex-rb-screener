@@ -99,30 +99,89 @@ class FloorConsolidationScenario(BaseScenario):
         min_depth = settings.get('fc_min_crash_depth')
         consol_days = settings.get('fc_consolidation_period_days')
         max_range = settings.get('fc_max_consolidation_range')
+        volume_ratio_max = settings.get('fc_volume_ratio_max', 1.0) # Default to 1.0 if not set
+        no_new_low_tolerance = settings.get('fc_no_new_low_tolerance', 0.03)
 
-        if len(stock_data) < lookback: return None
+        if len(stock_data) < lookback:
+            return None
 
+        # --- 1. Find the Peak and the subsequent Crash ---
         lookback_data = stock_data.iloc[-lookback:]
         peak_idx = lookback_data['High'].idxmax()
         peak_price = lookback_data['High'].max()
 
         data_after_peak = lookback_data.loc[peak_idx:]
-        if len(data_after_peak) < consol_days: return None
+        if len(data_after_peak) < consol_days:
+            return None
 
-        trough_price = data_after_peak['Low'].min()
+        trough_price_after_peak = data_after_peak['Low'].min()
+        crash_depth_pct = (peak_price - trough_price_after_peak) / peak_price if peak_price > 0 else 0
 
-        if (peak_price - trough_price) / peak_price < min_depth: return None
+        if crash_depth_pct < min_depth:
+            return None
 
-        consol_data = data_after_peak.iloc[-consol_days:]
+        # --- 2. Analyze the Consolidation Period ---
+        consol_data = stock_data.iloc[-consol_days:]
         consol_low = consol_data['Low'].min()
         consol_high = consol_data['High'].max()
 
-        if (consol_high - consol_low) / consol_low > max_range: return None
+        if consol_low < trough_price_after_peak * (1 - no_new_low_tolerance):
+            return None
 
-        technicals = {'price': stock_data['Close'].iloc[-1], 'Crash %': f"{(peak_price - trough_price) / peak_price:.1%}", 'Consol. Range %': f"{(consol_high - consol_low) / consol_low:.1%}"}
+        consolidation_range_pct = (consol_high - consol_low) / consol_low if consol_low > 0 else 0
+        if consolidation_range_pct > max_range:
+            return None
+
+        # --- 3. Analyze Volume ---
+        pre_crash_period_end_idx = stock_data.index.get_loc(peak_idx)
+        pre_crash_period_start_idx = max(0, pre_crash_period_end_idx - 60)
+        pre_crash_data = stock_data.iloc[pre_crash_period_start_idx:pre_crash_period_end_idx]
+
+        if pre_crash_data.empty:
+            return None
+
+        pre_crash_avg_volume = pre_crash_data['Volume'].mean()
+        consol_avg_volume = consol_data['Volume'].mean()
+        volume_ratio = consol_avg_volume / pre_crash_avg_volume if pre_crash_avg_volume > 0 else float('inf')
+
+        if volume_ratio > volume_ratio_max:
+            return None
+
+        # --- 4. All checks passed, compute score and create candidate ---
+        current_price = stock_data['Close'].iloc[-1]
+        score, score_breakdown = compute_floor_score(
+            consolidation_range_pct=consolidation_range_pct,
+            max_consolidation_range=max_range,
+            crash_depth_pct=crash_depth_pct,
+            volume_ratio=volume_ratio,
+            current_price=current_price,
+            consol_low=consol_low,
+            consol_high=consol_high
+        )
+
+        technicals = {
+            'price': current_price,
+            'Crash %': f"{crash_depth_pct:.1%}",
+            'Consol. Range %': f"{consolidation_range_pct:.1%}",
+            'Drop Date': peak_idx.strftime('%Y-%m-%d'),
+            'period_high_val': peak_price,
+            'period_high_idx': peak_idx,
+            'drop_low_val': trough_price_after_peak,
+            'consol_start_idx': consol_data.index[0],
+            'consol_end_idx': consol_data.index[-1],
+        }
         fundamentals = {'name': stock_info.get('shortName', 'N/A')}
-        score = compute_floor_score(technicals)
-        return ReboundCandidate(ticker=stock_info.get('symbol'), scenario=self.name, technical_score=score, fundamentals=fundamentals, history_df=stock_data, technicals=technicals)
+
+        return ReboundCandidate(
+            ticker=stock_info.get('symbol'),
+            scenario=self._name,
+            rebound_score=score,
+            technical_score=score,
+            fundamentals=fundamentals,
+            history_df=stock_data,
+            technicals=technicals,
+            score_breakdown=score_breakdown
+        )
 
 class MeanReversionScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
@@ -406,6 +465,12 @@ class ScenarioRunner:
                 continue
 
             stock_info = fund_data_packet['info']
+
+            # Add a defensive check to ensure stock_info is a dictionary.
+            if not stock_info:
+                self.telemetry['tickers_skipped']['total'] += 1
+                self.telemetry['tickers_skipped']['missing_fundamentals'] += 1
+                continue
 
             min_market_cap = settings.get('min_market_cap')
             min_avg_volume = settings.get('min_avg_volume_30d')

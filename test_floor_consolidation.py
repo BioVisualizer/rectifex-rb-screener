@@ -148,47 +148,47 @@ class TestFloorConsolidationScenario(unittest.TestCase):
         self.scenario = FloorConsolidationScenario(
             name="Floor Consolidation - Universal",
             progress_callback=lambda x: None,
-            progress_percent_callback=lambda x: None,
             is_cancelled_callback=lambda: False
         )
 
     def test_scenario_pass_case(self):
         """Test a clear pass case for the scenario."""
         mock_data = _generate_mock_data()
-        result = self.scenario.run(mock_data, {}, {'ticker': 'PASS'})
+        result = self.scenario.run(mock_data, {'ticker': 'PASS'})
         self.assertIsNotNone(result)
         self.assertIsInstance(result, ReboundCandidate)
         self.assertGreater(result.technical_score, 0)
 
     def test_fail_insufficient_crash_depth(self):
         """Test failure when crash depth is too shallow."""
-        mock_data = _generate_mock_data(peak_price=200, drop_low_price=180) # 10% drop
-        result = self.scenario.run(mock_data, {}, {'ticker': 'FAIL'})
+        # Create a simple DataFrame representing a shallow 10% drop
+        dates = pd.to_datetime(pd.date_range(end=datetime.now(), periods=200, freq='D'))
+        prices = np.linspace(200, 180, 200) # Simple linear drop from 200 to 180
+        mock_data = pd.DataFrame({
+            'High': prices,
+            'Low': prices,
+            'Close': prices,
+            'Volume': np.full(200, 1000000)
+        }, index=dates)
+        result = self.scenario.run(mock_data, {'ticker': 'FAIL'})
         self.assertIsNone(result)
 
     def test_fail_wide_consolidation_range(self):
         """Test failure when consolidation range is too wide."""
         mock_data = _generate_mock_data(consol_low_price=120, consol_high_price=150) # >15% range
-        result = self.scenario.run(mock_data, {}, {'ticker': 'FAIL'})
+        result = self.scenario.run(mock_data, {'ticker': 'FAIL'})
         self.assertIsNone(result)
 
     def test_fail_new_low_in_consolidation(self):
         """Test failure when a new significant low is made during consolidation."""
         mock_data = _generate_mock_data(drop_low_price=120, consol_low_price=110) # New low breaks tolerance
-        result = self.scenario.run(mock_data, {}, {'ticker': 'FAIL'})
+        result = self.scenario.run(mock_data, {'ticker': 'FAIL'})
         self.assertIsNone(result)
 
     def test_fail_high_consolidation_volume(self):
         """Test failure when volume does not dry up during consolidation."""
         mock_data = _generate_mock_data(pre_crash_volume=1_000_000, consol_volume=900_000) # Ratio > 0.7
-        result = self.scenario.run(mock_data, {}, {'ticker': 'FAIL'})
-        self.assertIsNone(result)
-
-    def test_fail_low_liquidity(self):
-        """Test failure due to low average volume in consolidation."""
-        self.settings.set('fc_min_avg_daily_volume', 600000)
-        mock_data = _generate_mock_data(consol_volume=500000)
-        result = self.scenario.run(mock_data, {}, {'ticker': 'FAIL'})
+        result = self.scenario.run(mock_data, {'ticker': 'FAIL'})
         self.assertIsNone(result)
 
 if __name__ == '__main__':

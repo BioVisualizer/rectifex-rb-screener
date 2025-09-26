@@ -259,12 +259,17 @@ async def get_historical_data_for_tickers(
     semaphore = asyncio.Semaphore(8)
     async def fetch_and_cache(ticker: str):
         async with semaphore:
-            if is_cancelled(): return ticker, None
-            data = await _fetch_single_ticker_history(ticker)
-            if data is not None and not data.empty:
-                cache_file = config.CACHE_DIR / f"{ticker.replace('^', 'INDEX-')}.csv"
-                await asyncio.to_thread(data.to_csv, cache_file)
-            return ticker, data
+            if is_cancelled():
+                return ticker, None
+            try:
+                data = await _fetch_single_ticker_history(ticker)
+                if data is not None and not data.empty:
+                    cache_file = config.CACHE_DIR / f"{ticker.replace('^', 'INDEX-')}.csv"
+                    await asyncio.to_thread(data.to_csv, cache_file)
+                return ticker, data
+            except Exception as e:
+                logging.error(f"Error fetching or caching historical data for {ticker}: {e}", exc_info=True)
+                return ticker, None
     tasks = [asyncio.create_task(fetch_and_cache(t)) for t in tickers_to_fetch]
 
     fetched_count = 0
@@ -277,8 +282,10 @@ async def get_historical_data_for_tickers(
             ticker, data = await future
             if data is not None: results[ticker] = data
             fetched_count += 1
-            if progress_callback: progress_callback.emit(f"Fetched historical data for {ticker} ({fetched_count}/{len(tickers_to_fetch)})")
-        except asyncio.CancelledError: pass
+            if progress_callback:
+                progress_callback.emit(f"Fetched historical data for {ticker} ({fetched_count}/{len(tickers_to_fetch)})")
+        except asyncio.CancelledError:
+            pass
     return results
 
 async def get_stock_data(ticker: str) -> pd.DataFrame | None:
