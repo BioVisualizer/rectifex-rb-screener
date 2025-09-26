@@ -137,10 +137,16 @@ class FundamentalDataHandler:
         semaphore = asyncio.Semaphore(8)
         async def fetch_with_semaphore(ticker: str):
             async with semaphore:
-                if is_cancelled(): return ticker, None
-                return ticker, await self._fetch_single_ticker(ticker)
+                if is_cancelled():
+                    return ticker, None
+                try:
+                    return ticker, await self._fetch_single_ticker(ticker)
+                except Exception as e:
+                    logging.error(f"Error fetching or caching fundamental data for {ticker}: {e}", exc_info=True)
+                    return ticker, None
 
         tasks = [asyncio.create_task(fetch_with_semaphore(t)) for t in tickers_to_fetch]
+        fetched_count = 0
         for future in asyncio.as_completed(tasks):
             if is_cancelled():
                 for task in tasks:
@@ -148,9 +154,13 @@ class FundamentalDataHandler:
                 break
             try:
                 ticker, data = await future
-                if data: results[ticker] = data
-                if progress_callback: progress_callback.emit(f"Fetched fundamentals for {ticker}")
-            except asyncio.CancelledError: pass
+                if data:
+                    results[ticker] = data
+                fetched_count += 1
+                if progress_callback:
+                    progress_callback.emit(f"Fetched fundamentals for {ticker} ({fetched_count}/{len(tickers_to_fetch)})")
+            except asyncio.CancelledError:
+                pass
         return results
 
     def compute_and_save_sector_medians(self):
