@@ -187,6 +187,15 @@ async def _fetch_single_ticker_history(ticker: str) -> pd.DataFrame | None:
             data.dropna(inplace=True)
             return data
         except Exception as e:
+            error_str = str(e)
+            # Handle non-transient errors by skipping the ticker immediately
+            if ('YFPricesMissingError' in error_str or
+                'No data found, symbol may be delisted' in error_str or
+                (isinstance(e, ValueError) and "The truth value of an" in error_str and "is ambiguous" in error_str)):
+                logging.warning(f"Skipping {ticker} due to a non-transient data error: {e}")
+                return None  # Do not retry for these errors
+
+            # For other exceptions, log a warning and retry
             logging.warning(f"Attempt {attempt + 1} for {ticker} failed: {e}")
             if attempt < max_retries - 1:
                 wait_time = base_wait_time * (2 ** attempt) + random.uniform(0, 1)
