@@ -12,6 +12,7 @@ import functools
 import time
 import random
 from typing import List, Dict, Callable, Optional
+from io import StringIO
 
 # Assuming config.py is in the same directory
 import config
@@ -40,7 +41,7 @@ def _get_tickers_from_wiki(index_details: dict) -> list[str] | None:
         }
         response = requests.get(index_details['wiki_url'], headers=headers)
         response.raise_for_status()
-        tables = pd.read_html(response.text)
+        tables = pd.read_html(StringIO(response.text))
         ticker_col_names = ['Ticker', 'Symbol', 'Ticker symbol']
         for table in tables:
             for col_name in ticker_col_names:
