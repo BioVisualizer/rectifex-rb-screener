@@ -22,45 +22,47 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-def fetch_history(ticker, period='1y', retries=2, backoff=1):
+async def fetch_history(ticker, period='1y', retries=2, backoff=1):
     """
-    Robust yfinance fetch: tries yf.download, falls back to Ticker.history, with retries.
-    Returns a clean DataFrame or None.
+    Robust, truly asynchronous yfinance fetch.
     """
+    loop = asyncio.get_running_loop()
     for attempt in range(retries + 1):
         try:
-            # 1) Try yf.download (often more stable for batch requests)
-            df = yf.download(ticker, period=period, threads=False, progress=False, auto_adjust=True)
+            # 1) Try yf.download
+            download_func = functools.partial(yf.download, ticker, period=period, threads=False, progress=False, auto_adjust=True)
+            df = await loop.run_in_executor(None, download_func)
+
             if df is not None and not df.empty:
-                logger.debug("yf.download OK for %s (shape=%s)", ticker, getattr(df, "shape", "N/A"))
+                logger.debug("yf.download OK for %s", ticker)
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
                 df.dropna(inplace=True)
                 return df
-            else:
-                logger.debug("yf.download returned empty or None for %s (attempt %d)", ticker, attempt + 1)
 
             # 2) Fallback to Ticker.history
-            tk = yf.Ticker(ticker)
-            df2 = tk.history(period=period, auto_adjust=True)
+            # yf.Ticker() itself can be slow, so run it in the executor too
+            ticker_func = functools.partial(yf.Ticker, ticker)
+            tk = await loop.run_in_executor(None, ticker_func)
+            history_func = functools.partial(tk.history, period=period, auto_adjust=True)
+            df2 = await loop.run_in_executor(None, history_func)
+
             if df2 is not None and not df2.empty:
-                logger.debug("Ticker.history OK for %s (shape=%s)", ticker, getattr(df2, "shape", "N/A"))
+                logger.debug("Ticker.history OK for %s", ticker)
                 if isinstance(df2.columns, pd.MultiIndex):
                     df2.columns = df2.columns.get_level_values(0)
                 df2.dropna(inplace=True)
                 return df2
-            else:
-                logger.debug("Ticker.history returned empty or None for %s (attempt %d)", ticker, attempt + 1)
 
         except Exception as e:
-            logger.warning("yfinance fetch error for %s (attempt %d): %s", ticker, attempt + 1, e, exc_info=False)
+            logger.warning(f"yfinance fetch error for {ticker} (attempt {attempt + 1}): {e}", exc_info=False)
 
         if attempt < retries:
             wait_time = backoff * (2 ** attempt)
-            logger.debug("Both fetch methods failed for %s. Retrying in %.2f seconds.", ticker, wait_time)
-            time.sleep(wait_time)
+            logger.debug(f"Fetch failed for {ticker}. Retrying in {wait_time:.2f} seconds.")
+            await asyncio.sleep(wait_time)
         else:
-            logger.warning("No data for ticker '%s' after all retries.", ticker)
+            logger.warning(f"No data for ticker '{ticker}' after all retries.")
 
     return None
 
@@ -219,13 +221,9 @@ async def _fetch_single_ticker_history(ticker: str) -> pd.DataFrame | None:
     Asynchronously downloads historical data for a single stock using the robust
     fetch_history wrapper.
     """
-    loop = asyncio.get_running_loop()
-    # The fetch_history function is synchronous, so we run it in an executor
-    # to avoid blocking the event loop. It contains its own retry logic.
-    data = await loop.run_in_executor(
-        None,
-        functools.partial(fetch_history, ticker=ticker, period=config.DATA_PERIOD)
-    )
+    # fetch_history is now an async function and can be awaited directly.
+    # It handles its own retries and runs blocking I/O in an executor internally.
+    data = await fetch_history(ticker=ticker, period=config.DATA_PERIOD)
     return data
 
 async def get_historical_data_for_tickers(

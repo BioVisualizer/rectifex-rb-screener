@@ -316,10 +316,8 @@ class ScenarioRunner:
                 if self.is_cancelled_callback():
                     return None
                 # Use a short period and fewer retries for a quick check.
-                df = await asyncio.get_running_loop().run_in_executor(
-                    None,
-                    functools.partial(data_loader.fetch_history, ticker=ticker, period="1mo", retries=1)
-                )
+                # fetch_history is already async, so we can await it directly.
+                df = await data_loader.fetch_history(ticker=ticker, period="1mo", retries=1)
                 return ticker if df is not None and not df.empty else None
 
         semaphore = asyncio.Semaphore(20)  # Use higher concurrency for these quick checks
