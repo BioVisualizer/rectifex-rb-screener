@@ -19,6 +19,51 @@ import config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+
+def fetch_history(ticker, period='1y', retries=2, backoff=1):
+    """
+    Robust yfinance fetch: tries yf.download, falls back to Ticker.history, with retries.
+    Returns a clean DataFrame or None.
+    """
+    for attempt in range(retries + 1):
+        try:
+            # 1) Try yf.download (often more stable for batch requests)
+            df = yf.download(ticker, period=period, threads=False, progress=False, auto_adjust=True)
+            if df is not None and not df.empty:
+                logger.debug("yf.download OK for %s (shape=%s)", ticker, getattr(df, "shape", "N/A"))
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.get_level_values(0)
+                df.dropna(inplace=True)
+                return df
+            else:
+                logger.debug("yf.download returned empty or None for %s (attempt %d)", ticker, attempt + 1)
+
+            # 2) Fallback to Ticker.history
+            tk = yf.Ticker(ticker)
+            df2 = tk.history(period=period, auto_adjust=True)
+            if df2 is not None and not df2.empty:
+                logger.debug("Ticker.history OK for %s (shape=%s)", ticker, getattr(df2, "shape", "N/A"))
+                if isinstance(df2.columns, pd.MultiIndex):
+                    df2.columns = df2.columns.get_level_values(0)
+                df2.dropna(inplace=True)
+                return df2
+            else:
+                logger.debug("Ticker.history returned empty or None for %s (attempt %d)", ticker, attempt + 1)
+
+        except Exception as e:
+            logger.warning("yfinance fetch error for %s (attempt %d): %s", ticker, attempt + 1, e, exc_info=False)
+
+        if attempt < retries:
+            wait_time = backoff * (2 ** attempt)
+            logger.debug("Both fetch methods failed for %s. Retrying in %.2f seconds.", ticker, wait_time)
+            time.sleep(wait_time)
+        else:
+            logger.warning("No data for ticker '%s' after all retries.", ticker)
+
+    return None
+
 
 def ensure_cache_dir_exists():
     """Creates the cache directory if it doesn't exist."""
@@ -171,38 +216,17 @@ def get_all_tickers() -> dict[str, list[str]]:
 
 async def _fetch_single_ticker_history(ticker: str) -> pd.DataFrame | None:
     """
-    Asynchronously downloads historical data for a single stock with exponential backoff.
+    Asynchronously downloads historical data for a single stock using the robust
+    fetch_history wrapper.
     """
-    max_retries = 3
-    base_wait_time = 2
-    for attempt in range(max_retries):
-        try:
-            loop = asyncio.get_running_loop()
-            download_func = functools.partial(yf.download, tickers=ticker, period=config.DATA_PERIOD, auto_adjust=True, progress=False)
-            data = await loop.run_in_executor(None, download_func)
-            if data.empty:
-                logging.warning(f"No data for ticker: {ticker}")
-                return None
-            if isinstance(data.columns, pd.MultiIndex):
-                data.columns = data.columns.get_level_values(0)
-            data.dropna(inplace=True)
-            return data
-        except Exception as e:
-            error_str = str(e)
-            # Handle non-transient errors by skipping the ticker immediately
-            if ('YFPricesMissingError' in error_str or
-                'No data found, symbol may be delisted' in error_str or
-                'No objects to concatenate' in error_str or
-                (isinstance(e, ValueError) and "The truth value of an" in error_str and "is ambiguous" in error_str)):
-                logging.warning(f"Skipping {ticker} due to a non-transient data error: {e}")
-                return None  # Do not retry for these errors
-
-            # For other exceptions, log a warning and retry
-            logging.warning(f"Attempt {attempt + 1} for {ticker} failed: {e}")
-            if attempt < max_retries - 1:
-                wait_time = base_wait_time * (2 ** attempt) + random.uniform(0, 1)
-                await asyncio.sleep(wait_time)
-    return None
+    loop = asyncio.get_running_loop()
+    # The fetch_history function is synchronous, so we run it in an executor
+    # to avoid blocking the event loop. It contains its own retry logic.
+    data = await loop.run_in_executor(
+        None,
+        functools.partial(fetch_history, ticker=ticker, period=config.DATA_PERIOD)
+    )
+    return data
 
 async def get_historical_data_for_tickers(
     tickers: List[str],
