@@ -82,6 +82,11 @@ class FundamentalDataHandler:
                 self._save_to_cache(ticker, data_packet)
                 return data_packet
             except Exception as e:
+                # This specific yfinance error is not transient, so we shouldn't retry.
+                if isinstance(e, ValueError) and "The truth value of an empty array is ambiguous" in str(e):
+                    logging.warning(f"Skipping {ticker} due to a yfinance internal data error: {e}")
+                    return None
+
                 logging.warning(f"Attempt {attempt + 1} for {ticker} failed: {e}")
                 if attempt < max_retries - 1:
                     wait_time = base_wait_time * (2 ** attempt) + random.uniform(0, 1)
