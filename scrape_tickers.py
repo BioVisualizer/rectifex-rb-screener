@@ -1,92 +1,114 @@
-import re
 import time
 import pandas as pd
 import yfinance as yf
-from tools import view_text_website # Assuming I can import the tool like this for scripting
+import requests
+from io import StringIO
+from pathlib import Path
 
-def scrape_stoxx600():
+def scrape_and_save_tickers(index_name: str, url: str, columns_to_try: list, output_filename: str):
     """
-    Scrapes, cleans, verifies, and saves the list of STOXX 600 tickers.
+    Generic function to scrape tickers from a table on a webpage, verify them, and save to CSV.
     """
-    print("--- Starting STOXX 600 Ticker Scraping and Verification ---")
+    print(f"--- Starting {index_name} Ticker Scraping and Verification ---")
 
-    base_url = "https://www.dividendmax.com/market-index-constituents/stoxx600?page="
-    all_tickers = []
+    headers = {'User-Agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0'}
 
-    # There are 564 tickers, 30 per page, so about 19 pages. Let's go to 20 to be safe.
-    for i in range(1, 21):
-        print(f"Scraping page {i}...")
-        url = base_url + str(i)
-        try:
-            content = view_text_website(url)
-            # Simple regex to find lines that start with a company name (and link)
-            # and extract the ticker and the flag.
-            # Example line: [23]3i Group plc III 🇬🇧 [24]London Stock Exchange
-            lines = content.split('\n')
-            found_on_page = 0
-            for line in lines:
-                # A crude but effective way to find the relevant lines
-                if line.strip().startswith('[') and 'Stock Exchange' in line:
-                    parts = line.split()
-                    if len(parts) > 2:
-                        ticker = parts[1]
-                        flag = parts[2]
-                        all_tickers.append({'ticker': ticker, 'flag': flag})
-                        found_on_page += 1
-            if found_on_page == 0 and i > 1:
-                print("No more tickers found. Stopping scrape.")
-                break
-        except Exception as e:
-            print(f"Could not scrape page {i}. Error: {e}")
-        time.sleep(1) # Be polite to the server
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        # Use StringIO to avoid pandas FutureWarning
+        tables = pd.read_html(StringIO(response.text))
+    except Exception as e:
+        print(f"ERROR: Could not fetch or parse the webpage for {index_name}. Error: {e}")
+        return
 
-    print(f"Found {len(all_tickers)} raw tickers. Now cleaning and adding suffixes.")
+    if not tables:
+        print(f"ERROR: No tables found on the page for {index_name}.")
+        return
 
-    flag_to_suffix = {
-        '🇩🇪': '.DE', '🇬🇧': '.L', '🇮🇹': '.MI', '🇸🇪': '.ST', '🇳🇱': '.AS',
-        '🇨🇭': '.SW', '🇫🇷': '.PA', '🇧🇪': '.BR', '🇪🇸': '.MC', '🇮🇪': '.IR',
-        '🇳🇴': '.OL', '🇫🇮': '.HE', '🇩🇰': '.CO', '🇦🇹': '.VI', '🇵🇹': '.LS'
-    }
+    df = tables[0]
 
-    processed_tickers = []
-    for item in all_tickers:
-        base_ticker = item['ticker']
-        flag = item['flag']
-        suffix = flag_to_suffix.get(flag)
-        if suffix:
-            # yfinance often uses '-' instead of '.' in tickers like 'BRK.B' -> 'BRK-B'
-            # Let's replace any dots in the base ticker.
-            base_ticker = base_ticker.replace('.', '-')
-            processed_tickers.append(base_ticker + suffix)
+    ticker_col = next((col for col in columns_to_try if col in df.columns), None)
+    if not ticker_col:
+        print(f"ERROR: Could not find any of the expected ticker columns {columns_to_try} in the table for {index_name}.")
+        print(f"Available columns: {df.columns.tolist()}")
+        return
 
-    # Remove duplicates
-    processed_tickers = sorted(list(set(processed_tickers)))
-    print(f"Processed {len(processed_tickers)} unique tickers. Now verifying with yfinance...")
+    raw_tickers = df[ticker_col].dropna().unique().tolist()
+    print(f"Found {len(raw_tickers)} unique tickers for {index_name}. Now verifying...")
 
     verified_tickers = []
-    for i, ticker in enumerate(processed_tickers):
-        print(f"Verifying [{i+1}/{len(processed_tickers)}]: {ticker}...")
+    for i, ticker in enumerate(raw_tickers):
+        # yfinance often uses '-' instead of '.' (e.g., BRK-B)
+        cleaned_ticker = str(ticker).replace('.', '-')
+
+        print(f"Verifying [{i+1}/{len(raw_tickers)}]: {cleaned_ticker}...", end='', flush=True)
         try:
-            stock = yf.Ticker(ticker)
-            # .info can be slow and return errors for valid tickers sometimes.
-            # A better check is to see if it has historical data.
+            stock = yf.Ticker(cleaned_ticker)
+            # A quick history check is more reliable than .info
             hist = stock.history(period="5d")
             if not hist.empty:
-                print(f"  -> {ticker} is VALID.")
-                verified_tickers.append(ticker)
+                print(" -> VALID")
+                verified_tickers.append(cleaned_ticker)
             else:
-                print(f"  -> {ticker} is INVALID (no history).")
+                print(" -> INVALID (no history)")
         except Exception:
-            print(f"  -> {ticker} is INVALID (exception).")
-        time.sleep(0.2)
+            print(" -> INVALID (exception)")
+        time.sleep(0.1) # Be polite to the server
 
-    print(f"\nVerification complete. Found {len(verified_tickers)} valid STOXX 600 tickers.")
+    print(f"\nVerification complete. Found {len(verified_tickers)} valid tickers for {index_name}.")
+
+    # Ensure the data directory exists
+    output_path = Path(output_filename)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Save to CSV
-    df = pd.DataFrame(verified_tickers, columns=["Ticker"])
-    df.to_csv("stoxx600_verified.csv", index=False)
-    print("Saved verified tickers to stoxx600_verified.csv")
+    output_df = pd.DataFrame(sorted(verified_tickers), columns=["Ticker"])
+    output_df.to_csv(output_path, index=False)
+    print(f"Saved verified tickers to {output_path}")
+
+
+def scrape_stoxx600():
+    # Slickcharts is a reliable source for index components
+    scrape_and_save_tickers(
+        index_name="STOXX 600",
+        url="https://www.slickcharts.com/stoxx600",
+        columns_to_try=['Symbol'],
+        output_filename="data/stoxx600_tickers.csv"
+    )
+
+def scrape_dax():
+    scrape_and_save_tickers(
+        index_name="DAX",
+        url="https://www.slickcharts.com/dax",
+        columns_to_try=['Symbol'],
+        output_filename="data/dax_tickers.csv"
+    )
+
+def scrape_nasdaq100():
+    scrape_and_save_tickers(
+        index_name="NASDAQ 100",
+        url="https://www.slickcharts.com/nasdaq100",
+        columns_to_try=['Symbol'],
+        output_filename="data/nasdaq100_tickers.csv"
+    )
+
+def scrape_sp500():
+     scrape_and_save_tickers(
+        index_name="S&P 500",
+        url="https://www.slickcharts.com/sp500",
+        columns_to_try=['Symbol'],
+        output_filename="data/sp500_tickers.csv"
+    )
 
 if __name__ == '__main__':
+    # Add other scrapers here as needed
+    scrape_dax()
+    print("\n" + "="*40 + "\n")
     scrape_stoxx600()
-    # In a real run, I would add the Nikkei scraper here too.
+    print("\n" + "="*40 + "\n")
+    scrape_nasdaq100()
+    print("\n" + "="*40 + "\n")
+    scrape_sp500()
+    print("\n" + "="*40 + "\n")
+    print("All scraping tasks complete.")
