@@ -64,7 +64,8 @@ def _get_tickers_from_csv(index_details: dict) -> list[str]:
         df = pd.read_csv(fallback_path)
         # Use the 'Ticker' column if it exists, otherwise assume the first column
         ticker_col = 'Ticker' if 'Ticker' in df.columns else df.columns[0]
-        return df[ticker_col].dropna().tolist()
+        # Clean up tickers by stripping whitespace
+        return [str(t).strip() for t in df[ticker_col].dropna().tolist()]
     except Exception as e:
         logging.error(f"Failed to read fallback CSV {fallback_path}: {e}")
         return []
@@ -73,13 +74,25 @@ def _post_process_tickers(tickers: list[str], market: str) -> list[str]:
     """
     Applies market-specific transformations to ticker symbols, avoiding duplicate suffixes.
     """
-    if market == 'DE':
-        # Only add .DE if it's not there and no other suffix exists
-        return [f"{t}.DE" if '.' not in t else t for t in tickers]
-    if market == 'JP':
-        # Only add .T if it's not there and no other suffix exists
-        return [f"{t}.T" if '.' not in t else t for t in tickers]
-    return tickers
+    processed_tickers = []
+    for t in tickers:
+        # Skip empty tickers and clean up whitespace
+        cleaned_ticker = t.strip()
+        if not cleaned_ticker:
+            continue
+
+        # Apply suffix only if one doesn't already exist
+        if '.' not in cleaned_ticker:
+            if market == 'DE':
+                processed_tickers.append(f"{cleaned_ticker}.DE")
+            elif market == 'JP':
+                processed_tickers.append(f"{cleaned_ticker}.T")
+            else:
+                processed_tickers.append(cleaned_ticker)
+        else:
+            processed_tickers.append(cleaned_ticker)
+
+    return processed_tickers
 
 def _get_tickers_from_user_csv(index_name: str) -> list[str] | None:
     """
@@ -211,7 +224,6 @@ async def get_historical_data_for_tickers(
     if not tickers_to_fetch or is_cancelled(): return results
 
     semaphore = asyncio.Semaphore(8)
-    tasks = []
     async def fetch_and_cache(ticker: str):
         async with semaphore:
             if is_cancelled(): return ticker, None
