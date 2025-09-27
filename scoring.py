@@ -104,7 +104,7 @@ def compute_fundamental_score(
     """
     total_score = 0.0
     total_weight = 0.0
-    breakdown = {}
+    breakdown: Dict[str, Any] = {}
 
     sector_data = sector_stats.get(sector, {})
     sector_median_values = sector_data.get('medians', {})
@@ -113,9 +113,10 @@ def compute_fundamental_score(
     for metric, weight in weights.items():
         value = fundamentals.get(metric)
         if value is None:
+            breakdown[f"{metric}_sub_score"] = None
             continue
 
-        sub_score = 0
+        sub_score: Optional[int]
         if metric == 'payout_ratio':
             # Special handling for bounded metrics like payout ratio
             sub_score = normalize_bounded_metric(value, ideal_range=(0.15, 0.50), acceptable_range=(0.0, 0.80))
@@ -124,9 +125,12 @@ def compute_fundamental_score(
             median = sector_median_values.get(metric)
             std_dev = sector_std_devs.get(metric)
 
-            if median is not None and std_dev is not None:
-                higher_is_better = metric in HIGHER_IS_BETTER_METRICS
-                sub_score = metric_to_subscore(value, median, std_dev, higher_is_better)
+            if median is None or std_dev is None:
+                breakdown[f"{metric}_sub_score"] = None
+                continue
+
+            higher_is_better = metric in HIGHER_IS_BETTER_METRICS
+            sub_score = metric_to_subscore(value, median, std_dev, higher_is_better)
 
         breakdown[f"{metric}_sub_score"] = sub_score
         total_score += sub_score * weight
