@@ -548,7 +548,21 @@ class ScenarioRunner:
         scenario_params = next((s.get('params', {}) for s in self.scenarios_config if s['id'] == scenario_id), {})
 
         all_tickers_by_market = {"CUSTOM": [ticker]} if ticker else data_loader.get_all_tickers()
-        all_tickers_flat = [t for sublist in all_tickers_by_market.values() for t in sublist]
+
+        # Deduplicate tickers while preserving their first-seen order. Some indices
+        # share constituents, which previously resulted in the same ticker being
+        # scanned (and shown) multiple times. Using a simple list comprehension here
+        # would keep the duplicates, so we explicitly track what we've already
+        # encountered.
+        seen_tickers = set()
+        all_tickers_flat: List[str] = []
+        for market_tickers in all_tickers_by_market.values():
+            for candidate in market_tickers:
+                if candidate in seen_tickers:
+                    continue
+                seen_tickers.add(candidate)
+                all_tickers_flat.append(candidate)
+
         self.telemetry['total_tickers_in_universe'] = len(all_tickers_flat)
 
         # --- Pre-scan validation ---
