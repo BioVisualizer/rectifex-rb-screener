@@ -352,7 +352,19 @@ class ScenarioRunner:
         self.is_cancelled_callback = is_cancelled_callback or (lambda: False)
         self.scenarios_config = self.load_scenarios_config()
         self.fundamental_handler = FundamentalDataHandler()
-        self.telemetry = {"scan_duration_seconds": 0, "total_tickers_in_universe": 0, "tickers_processed": 0, "tickers_skipped": {"total": 0, "missing_fundamentals": 0, "insufficient_history": 0, "liquidity": 0, "other": 0}}
+        self.telemetry = {
+            "scan_duration_seconds": 0,
+            "total_tickers_in_universe": 0,
+            "tickers_processed": 0,
+            "tickers_skipped": {
+                "total": 0,
+                "missing_fundamentals": 0,
+                "insufficient_history": 0,
+                "liquidity": 0,
+                "other": 0,
+            },
+            "data_fetch_failures": {},
+        }
 
     def cancel(self):
         """Allows the AnalysisWorker to signal cancellation."""
@@ -378,7 +390,7 @@ class ScenarioRunner:
                     return None
                 # Use a short period and fewer retries for a quick check.
                 # fetch_history is already async, so we can await it directly.
-                df = await data_loader.fetch_history(ticker=ticker, period="1mo", retries=1)
+                df, _ = await data_loader.fetch_history(ticker=ticker, period="1mo", retries=1)
                 return ticker if df is not None and not df.empty else None
 
         semaphore = asyncio.Semaphore(20)  # Use higher concurrency for these quick checks
@@ -444,6 +456,7 @@ class ScenarioRunner:
         # --- End validation ---
 
         historical_data_map = await data_loader.get_historical_data_for_tickers(valid_tickers, self.progress_callback, self.is_cancelled_callback)
+        self.telemetry['data_fetch_failures'] = data_loader.get_last_failed_tickers()
         fundamental_data_map = await self.fundamental_handler.get_fundamentals_for_tickers(valid_tickers, self.progress_callback, self.is_cancelled_callback)
 
         all_candidates = []

@@ -1,7 +1,7 @@
 # data_loader.py
 # Responsible for downloading and caching stock data.
 
-import os
+import json
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
@@ -9,9 +9,8 @@ from pathlib import Path
 import logging
 import asyncio
 import functools
-import time
 import random
-from typing import List, Dict, Callable, Optional
+from typing import List, Dict, Callable, Optional, Tuple
 from io import StringIO
 
 # Assuming config.py is in the same directory
@@ -22,16 +21,30 @@ from ticker_utils import normalize_ticker_for_yfinance
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+FAILURE_CACHE_EXPIRY_HOURS = getattr(config, "FAILED_HISTORY_CACHE_EXPIRY_HOURS", 6)
+_last_failed_tickers: Dict[str, Dict[str, str]] = {}
 
-async def fetch_history(ticker, period='1y', retries=2, backoff=1):
-    """
-    Robust, truly asynchronous yfinance fetch.
-    """
+
+_NON_RETRIABLE_ERROR_SNIPPETS = (
+    "no data",  # generic catch-all for a variety of yfinance messages
+    "no timezone",
+    "no price",
+    "No objects to concatenate",
+    "not found",
+    "delisted",
+)
+
+
+async def fetch_history(ticker, period='1y', retries=2, backoff=1) -> Tuple[pd.DataFrame | None, Dict[str, str] | None]:
+    """Robust, truly asynchronous yfinance fetch that surfaces failure details."""
     loop = asyncio.get_running_loop()
     fetch_ticker = normalize_ticker_for_yfinance(ticker)
+    last_error: str | None = None
+    attempts = 0
+
     for attempt in range(retries + 1):
+        attempts = attempt + 1
         try:
-            # 1) Try yf.download
             download_func = functools.partial(
                 yf.download,
                 fetch_ticker,
@@ -47,10 +60,10 @@ async def fetch_history(ticker, period='1y', retries=2, backoff=1):
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
                 df.dropna(inplace=True)
-                return df
+                return df, None
 
-            # 2) Fallback to Ticker.history
-            # yf.Ticker() itself can be slow, so run it in the executor too
+            last_error = "Empty dataframe returned from yf.download"
+
             ticker_func = functools.partial(yf.Ticker, fetch_ticker)
             tk = await loop.run_in_executor(None, ticker_func)
             history_func = functools.partial(tk.history, period=period, auto_adjust=True)
@@ -61,22 +74,100 @@ async def fetch_history(ticker, period='1y', retries=2, backoff=1):
                 if isinstance(df2.columns, pd.MultiIndex):
                     df2.columns = df2.columns.get_level_values(0)
                 df2.dropna(inplace=True)
-                return df2
+                return df2, None
+
+            last_error = "Empty dataframe returned from Ticker.history"
 
         except Exception as e:
-            logger.warning(
-                f"yfinance fetch error for {ticker} (attempt {attempt + 1}) using symbol {fetch_ticker}: {e}",
-                exc_info=False,
+            last_error = str(e) or repr(e)
+            log_message = (
+                f"yfinance fetch error for {ticker} (attempt {attempt + 1}) "
+                f"using symbol {fetch_ticker}: {last_error}"
             )
+            if _is_non_retriable_error(last_error):
+                logger.info(log_message)
+            else:
+                logger.warning(log_message)
 
         if attempt < retries:
-            wait_time = backoff * (2 ** attempt)
-            logger.debug(f"Fetch failed for {ticker}. Retrying in {wait_time:.2f} seconds.")
+            if last_error and _is_non_retriable_error(last_error):
+                logger.debug("Encountered non-retriable error for %s; aborting retries.", ticker)
+                break
+            wait_time = backoff * (2 ** attempt) + random.uniform(0.2, 0.8)
+            logger.debug(
+                "Fetch failed for %s. Retrying in %.2f seconds (attempt %d/%d).",
+                ticker,
+                wait_time,
+                attempt + 1,
+                retries + 1,
+            )
             await asyncio.sleep(wait_time)
-        else:
-            logger.warning(f"No data for ticker '{ticker}' after all retries.")
 
-    return None
+    failure_details = {
+        "reason": last_error or "No data returned from yfinance",
+        "symbol": fetch_ticker,
+        "attempts": attempts,
+        "non_retriable": bool(last_error and _is_non_retriable_error(last_error)),
+    }
+    logger.warning(f"No data for ticker '{ticker}' after {attempts} attempt(s). Reason: {failure_details['reason']}")
+    return None, failure_details
+
+
+def _is_non_retriable_error(message: str) -> bool:
+    normalized = message.lower()
+    return any(snippet in normalized for snippet in _NON_RETRIABLE_ERROR_SNIPPETS)
+
+
+def _get_failure_marker_path(ticker: str) -> Path:
+    safe_name = ticker.replace('^', 'INDEX-')
+    return config.CACHE_DIR / f"{safe_name}.failed.json"
+
+
+def _load_failure_marker(marker_path: Path) -> Dict[str, str] | None:
+    try:
+        with marker_path.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.debug("Failed to load failure marker %s: %s", marker_path, exc)
+        return None
+
+
+def _register_failed_ticker(ticker: str, details: Dict[str, str]) -> None:
+    global _last_failed_tickers
+    _last_failed_tickers[ticker] = details
+
+
+async def _persist_failure_marker(ticker: str, details: Dict[str, str]) -> None:
+    marker_path = _get_failure_marker_path(ticker)
+    marker_data = details.copy()
+    marker_data["timestamp"] = datetime.utcnow().isoformat()
+
+    def _write():
+        marker_path.parent.mkdir(parents=True, exist_ok=True)
+        with marker_path.open("w", encoding="utf-8") as handle:
+            json.dump(marker_data, handle)
+
+    await asyncio.to_thread(_write)
+
+
+async def _clear_failure_marker(ticker: str) -> None:
+    marker_path = _get_failure_marker_path(ticker)
+
+    def _remove():
+        try:
+            marker_path.unlink()
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            logger.debug("Failed to remove failure marker %s: %s", marker_path, exc)
+
+    await asyncio.to_thread(_remove)
+
+
+def get_last_failed_tickers() -> Dict[str, Dict[str, str]]:
+    return dict(_last_failed_tickers)
 
 
 def ensure_cache_dir_exists():
@@ -228,15 +319,14 @@ def get_all_tickers() -> dict[str, list[str]]:
         market_to_tickers["CUSTOM"].update(master_tickers)
     return {market: sorted(list(tickers)) for market, tickers in market_to_tickers.items()}
 
-async def _fetch_single_ticker_history(ticker: str) -> pd.DataFrame | None:
+async def _fetch_single_ticker_history(ticker: str) -> Tuple[pd.DataFrame | None, Dict[str, str] | None]:
     """
     Asynchronously downloads historical data for a single stock using the robust
     fetch_history wrapper.
     """
     # fetch_history is now an async function and can be awaited directly.
     # It handles its own retries and runs blocking I/O in an executor internally.
-    data = await fetch_history(ticker=ticker, period=config.DATA_PERIOD)
-    return data
+    return await fetch_history(ticker=ticker, period=config.DATA_PERIOD)
 
 async def get_historical_data_for_tickers(
     tickers: List[str],
@@ -246,13 +336,47 @@ async def get_historical_data_for_tickers(
     """
     Asynchronously retrieves historical data for a list of tickers.
     """
+    global _last_failed_tickers
     ensure_cache_dir_exists()
     is_cancelled = is_cancelled_callback or (lambda: False)
-    results, tickers_to_fetch = {}, []
+    results: Dict[str, pd.DataFrame] = {}
+    tickers_to_fetch: list[str] = []
+    failed_tickers: Dict[str, Dict[str, str]] = {}
+    _last_failed_tickers = {}
     cache_hits = 0
     for ticker in tickers:
         if is_cancelled(): break
         cache_file = config.CACHE_DIR / f"{ticker.replace('^', 'INDEX-')}.csv"
+        failure_marker = _get_failure_marker_path(ticker)
+        marker_payload = _load_failure_marker(failure_marker)
+        if marker_payload:
+            timestamp_str = marker_payload.get("timestamp")
+            marker_time = None
+            if timestamp_str:
+                try:
+                    marker_time = datetime.fromisoformat(timestamp_str)
+                except ValueError:
+                    marker_time = None
+
+            if marker_time and datetime.utcnow() - marker_time < timedelta(hours=FAILURE_CACHE_EXPIRY_HOURS):
+                failure_record = {
+                    "reason": marker_payload.get("reason", "Unknown error"),
+                    "symbol": marker_payload.get("symbol", ticker),
+                    "attempts": marker_payload.get("attempts", 0),
+                    "cached": True,
+                    "last_attempt_utc": timestamp_str,
+                }
+                failed_tickers[ticker] = failure_record
+                _register_failed_ticker(ticker, failure_record)
+                if progress_callback:
+                    progress_callback.emit(
+                        f"Skipping {ticker}: cached fetch failure ({failure_record['reason']})."
+                    )
+                continue
+
+            # Marker is stale; clean it up asynchronously
+            await _clear_failure_marker(ticker)
+
         if cache_file.exists():
             mod_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
             if datetime.now() - mod_time < timedelta(hours=config.HISTORICAL_CACHE_EXPIRY_HOURS):
@@ -269,16 +393,33 @@ async def get_historical_data_for_tickers(
     if not tickers_to_fetch or is_cancelled(): return results
 
     semaphore = asyncio.Semaphore(8)
+
     async def fetch_and_cache(ticker: str):
         async with semaphore:
             if is_cancelled():
                 return ticker, None
             try:
-                data = await _fetch_single_ticker_history(ticker)
+                data, failure_details = await _fetch_single_ticker_history(ticker)
                 if data is not None and not data.empty:
                     cache_file = config.CACHE_DIR / f"{ticker.replace('^', 'INDEX-')}.csv"
                     await asyncio.to_thread(data.to_csv, cache_file)
-                return ticker, data
+                    await _clear_failure_marker(ticker)
+                    return ticker, data
+
+                if failure_details:
+                    failure_record = {
+                        **failure_details,
+                        "cached": False,
+                        "last_attempt_utc": datetime.utcnow().isoformat(),
+                    }
+                    failed_tickers[ticker] = failure_record
+                    _register_failed_ticker(ticker, failure_record)
+                    await _persist_failure_marker(ticker, failure_record)
+                    if progress_callback:
+                        progress_callback.emit(
+                            f"No price data for {ticker}: {failure_record['reason']}"
+                        )
+                return ticker, None
             except Exception as e:
                 logging.error(f"Error fetching or caching historical data for {ticker}: {e}", exc_info=True)
                 return ticker, None
@@ -292,10 +433,16 @@ async def get_historical_data_for_tickers(
             break
         try:
             ticker, data = await future
-            if data is not None: results[ticker] = data
+            if data is not None:
+                results[ticker] = data
             fetched_count += 1
             if progress_callback: progress_callback.emit(f"Fetched historical data for {ticker} ({fetched_count}/{len(tickers_to_fetch)})")
         except asyncio.CancelledError: pass
+
+    if failed_tickers and progress_callback:
+        progress_callback.emit(
+            f"Price data unavailable for {len(failed_tickers)} ticker(s)."
+        )
     return results
 
 async def get_stock_data(ticker: str) -> pd.DataFrame | None:

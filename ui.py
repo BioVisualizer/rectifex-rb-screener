@@ -1379,6 +1379,9 @@ class MainWindow(QMainWindow):
                 f"<b>Tickers Skipped:</b> {skipped['total']} "
                 f"(Liquidity: {skipped['liquidity']}, History: {skipped['insufficient_history']}, Fundamentals: {skipped['missing_fundamentals']})"
             )
+            failure_count = len(self.last_telemetry.get('data_fetch_failures', {}))
+            if failure_count:
+                telemetry_text += f"\n<b>Missing price data:</b> {failure_count}"
             dialog.telemetry_label.setText(telemetry_text)
         dialog.exec()
 
@@ -1526,7 +1529,11 @@ class MainWindow(QMainWindow):
              self.status_bar.showMessage(f"Scan stopped by user. {len(results)} candidates found before stopping.")
         else:
             skipped_total = telemetry['tickers_skipped']['total']
-            self.status_bar.showMessage(f"Scan complete. Found {len(results)} candidates. (Skipped {skipped_total})")
+            failure_count = len(telemetry.get('data_fetch_failures', {}))
+            status_message = f"Scan complete. Found {len(results)} candidates. (Skipped {skipped_total})"
+            if failure_count:
+                status_message += f" | Missing price data: {failure_count}"
+            self.status_bar.showMessage(status_message)
 
         self.run_scan_button.setEnabled(True)
         self.single_ticker_input.setEnabled(True)
