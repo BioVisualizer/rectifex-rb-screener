@@ -5,6 +5,8 @@ import requests
 from io import StringIO
 from pathlib import Path
 
+from ticker_utils import normalize_ticker_for_yfinance
+
 def verify_and_save_tickers(index_name: str, tickers_to_verify: list, output_filename: str):
     """
     Verifies a list of tickers using yfinance and saves the valid ones to a CSV file.
@@ -17,9 +19,11 @@ def verify_and_save_tickers(index_name: str, tickers_to_verify: list, output_fil
         if not cleaned_ticker:
             continue
 
+        fetch_ticker = normalize_ticker_for_yfinance(cleaned_ticker)
+
         print(f"Verifying [{i+1}/{len(tickers_to_verify)}]: {cleaned_ticker}...", end='', flush=True)
         try:
-            stock = yf.Ticker(cleaned_ticker)
+            stock = yf.Ticker(fetch_ticker)
             hist = stock.history(period="5d")
             if not hist.empty:
                 print(" -> VALID")
