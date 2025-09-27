@@ -63,6 +63,10 @@ FAILED_HISTORY_CACHE_EXPIRY_HOURS = 6  # Remember failed price fetches for 6 hou
 
 # -- Data Loading Configuration --
 DATA_PERIOD = "18mo" # Download 18 months of historical data
+MINIMUM_HISTORY_PERIOD = "6mo"  # Short requests are automatically extended to at least six months
+MIN_FALLBACK_HISTORY_DAYS = 180  # Explicit date-range retries request at least ~six months of data
+YFINANCE_THROTTLE_SECONDS = 1.0  # Delay between yfinance requests to avoid rate limiting
+VALIDATION_HISTORY_PERIOD = "6mo"  # Period used for the quick validation step
 SAFE_GET_DEFAULT = None # Default value for the safe_get utility
 
 # -- Analysis & Filtering Criteria --
