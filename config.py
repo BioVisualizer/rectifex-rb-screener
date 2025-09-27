@@ -59,6 +59,7 @@ USER_TICKER_DIR = APP_DATA_DIR / "tickers"
 CACHE_DIR = Path(os.path.expanduser("~")) / ".cache" / "GlobalReboundScreener"
 HISTORICAL_CACHE_EXPIRY_HOURS = 24  # Cache for OHLCV data is valid for 24 hours
 FUNDAMENTAL_CACHE_EXPIRY_DAYS = 7    # Cache for fundamental .info data is valid for 7 days
+FAILED_HISTORY_CACHE_EXPIRY_HOURS = 6  # Remember failed price fetches for 6 hours to avoid spamming retries
 
 # -- Data Loading Configuration --
 DATA_PERIOD = "18mo" # Download 18 months of historical data
