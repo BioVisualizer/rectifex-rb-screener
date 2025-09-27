@@ -36,7 +36,9 @@
             "build-options": {
                 "build-args": [
                     "--share=network"
-                ]
+                ],
+                "strip": false,
+                "no-debuginfo": true
             },
             "build-commands": [
                 "pip3 install --prefix=/app --no-cache-dir numpy",
