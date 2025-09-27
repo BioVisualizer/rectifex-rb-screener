@@ -9,6 +9,12 @@ import re
 # are not mis-identified as share classes.
 _SHARE_CLASS_PATTERN = re.compile(r"^(?P<base>[A-Z]+[A-Z0-9]*)\.(?P<class>[A-Z])$")
 
+# Yahoo only expects a hyphen for a very small set of US share-class suffixes
+# (mainly ``.A``/``.B``/``.C``). Suffixes such as ``.L`` or ``.F`` indicate the
+# exchange rather than a share class, so we explicitly guard against rewriting
+# those tickers to avoid breaking lookups for markets like London or Frankfurt.
+_SHARE_CLASS_SUFFIXES = frozenset({"A", "B", "C"})
+
 
 def normalize_ticker_for_yfinance(ticker: str) -> str:
     """Return a Yahoo Finance compatible ticker symbol.
@@ -35,8 +41,9 @@ def normalize_ticker_for_yfinance(ticker: str) -> str:
     if not cleaned:
         return cleaned
 
-    match = _SHARE_CLASS_PATTERN.match(cleaned.upper())
-    if match:
+    upper_cleaned = cleaned.upper()
+    match = _SHARE_CLASS_PATTERN.match(upper_cleaned)
+    if match and match.group('class') in _SHARE_CLASS_SUFFIXES:
         return f"{match.group('base')}-{match.group('class')}"
 
     return cleaned
