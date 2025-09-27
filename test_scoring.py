@@ -96,6 +96,29 @@ class TestScoring(unittest.TestCase):
         self.assertEqual(breakdown['roe_sub_score'], 57)
         self.assertEqual(breakdown['debt_equity_sub_score'], 57)
 
+    def test_compute_fundamental_score_ignores_missing_sector_stats(self):
+        fundamentals = {'revenue_3yr_cagr': 0.20, 'roe': 0.25}
+        weights = {'revenue_3yr_cagr': 0.6, 'roe': 0.4}
+        # Sector stats missing entries for ROE
+        sector_stats = {
+            'Technology': {
+                'medians': {'revenue_3yr_cagr': 0.10},
+                'std_devs': {'revenue_3yr_cagr': 0.05}
+            }
+        }
+
+        fund_score, breakdown = compute_fundamental_score(
+            fundamentals=fundamentals,
+            sector='Technology',
+            sector_stats=sector_stats,
+            weights=weights
+        )
+
+        # Only revenue_3yr_cagr should contribute since ROE lacks sector stats
+        self.assertEqual(fund_score, 70)
+        self.assertEqual(breakdown['revenue_3yr_cagr_sub_score'], 70)
+        self.assertIsNone(breakdown['roe_sub_score'])
+
     def test_compute_rebound_score(self):
         weights = {'tech': 0.55, 'fund': 0.30, 'market': 0.15}
         score = compute_rebound_score(tech_score=75, fund_score=57, market_score=50, weights=weights)
