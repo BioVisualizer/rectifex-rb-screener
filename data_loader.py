@@ -10,6 +10,7 @@ import logging
 import asyncio
 import functools
 import random
+import re
 from typing import List, Dict, Callable, Optional, Tuple
 from io import StringIO
 
@@ -35,6 +36,45 @@ _NON_RETRIABLE_ERROR_SNIPPETS = (
 )
 
 
+def _period_to_timedelta(period: str) -> timedelta:
+    """Best-effort conversion of a yfinance period string to a timedelta."""
+    if not isinstance(period, str):
+        return timedelta(days=365)
+
+    match = re.fullmatch(r"(\d+)([a-zA-Z]+)", period.strip())
+    if not match:
+        return timedelta(days=365)
+
+    value, unit = match.groups()
+    amount = int(value)
+    unit = unit.lower()
+
+    if unit in {"d", "day", "days"}:
+        return timedelta(days=amount)
+    if unit in {"wk", "w", "week", "weeks"}:
+        return timedelta(weeks=amount)
+    if unit in {"mo", "m", "month", "months"}:
+        # Approximate a calendar month as 30 days; sufficient for logging/debugging.
+        return timedelta(days=30 * amount)
+    if unit in {"y", "yr", "yrs", "year", "years"}:
+        return timedelta(days=365 * amount)
+
+    return timedelta(days=365)
+
+
+def _build_history_kwargs(period: str | None) -> Dict[str, object]:
+    """Centralise kwargs used for yfinance history downloads."""
+    kwargs: Dict[str, object] = {
+        "interval": "1d",
+        "auto_adjust": False,
+        "actions": False,
+        "prepost": False,
+    }
+    if period:
+        kwargs["period"] = period
+    return kwargs
+
+
 async def fetch_history(ticker, period='1y', retries=2, backoff=1) -> Tuple[pd.DataFrame | None, Dict[str, str] | None]:
     """Robust, truly asynchronous yfinance fetch that surfaces failure details."""
     loop = asyncio.get_running_loop()
@@ -42,16 +82,18 @@ async def fetch_history(ticker, period='1y', retries=2, backoff=1) -> Tuple[pd.D
     last_error: str | None = None
     attempts = 0
 
+    history_kwargs = _build_history_kwargs(period)
+    fallback_context: Dict[str, str] | None = None
+
     for attempt in range(retries + 1):
         attempts = attempt + 1
         try:
             download_func = functools.partial(
                 yf.download,
                 fetch_ticker,
-                period=period,
-                threads=False,
                 progress=False,
-                auto_adjust=True,
+                threads=False,
+                **history_kwargs,
             )
             df = await loop.run_in_executor(None, download_func)
 
@@ -63,10 +105,15 @@ async def fetch_history(ticker, period='1y', retries=2, backoff=1) -> Tuple[pd.D
                 return df, None
 
             last_error = "Empty dataframe returned from yf.download"
+            logger.info(
+                "yf.download returned empty dataframe for %s with params %s",
+                ticker,
+                history_kwargs,
+            )
 
             ticker_func = functools.partial(yf.Ticker, fetch_ticker)
             tk = await loop.run_in_executor(None, ticker_func)
-            history_func = functools.partial(tk.history, period=period, auto_adjust=True)
+            history_func = functools.partial(tk.history, **history_kwargs)
             df2 = await loop.run_in_executor(None, history_func)
 
             if df2 is not None and not df2.empty:
@@ -77,6 +124,48 @@ async def fetch_history(ticker, period='1y', retries=2, backoff=1) -> Tuple[pd.D
                 return df2, None
 
             last_error = "Empty dataframe returned from Ticker.history"
+            logger.info(
+                "Ticker.history returned empty dataframe for %s with params %s",
+                ticker,
+                history_kwargs,
+            )
+
+            if period:
+                fallback_end = (datetime.utcnow() - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+                fallback_start = fallback_end - _period_to_timedelta(period)
+                if fallback_start >= fallback_end:
+                    fallback_start = fallback_end - timedelta(days=7)
+                fallback_kwargs = _build_history_kwargs(None)
+                fallback_kwargs.update({
+                    "start": fallback_start,
+                    "end": fallback_end,
+                })
+                fallback_context = {
+                    "fallback_start": fallback_start.isoformat(),
+                    "fallback_end": fallback_end.isoformat(),
+                }
+                logger.debug(
+                    "Retrying %s with explicit date range start=%s end=%s",
+                    ticker,
+                    fallback_start,
+                    fallback_end,
+                )
+                history_func = functools.partial(tk.history, **fallback_kwargs)
+                df3 = await loop.run_in_executor(None, history_func)
+
+                if df3 is not None and not df3.empty:
+                    logger.debug("Ticker.history fallback OK for %s", ticker)
+                    if isinstance(df3.columns, pd.MultiIndex):
+                        df3.columns = df3.columns.get_level_values(0)
+                    df3.dropna(inplace=True)
+                    return df3, None
+
+                last_error = "Empty dataframe returned from Ticker.history (explicit range)"
+                logger.info(
+                    "Ticker.history explicit-range fallback empty for %s with params %s",
+                    ticker,
+                    fallback_kwargs,
+                )
 
         except Exception as e:
             last_error = str(e) or repr(e)
@@ -108,7 +197,10 @@ async def fetch_history(ticker, period='1y', retries=2, backoff=1) -> Tuple[pd.D
         "symbol": fetch_ticker,
         "attempts": attempts,
         "non_retriable": bool(last_error and _is_non_retriable_error(last_error)),
+        "requested_period": period,
     }
+    if fallback_context:
+        failure_details.update(fallback_context)
     logger.warning(f"No data for ticker '{ticker}' after {attempts} attempt(s). Reason: {failure_details['reason']}")
     return None, failure_details
 
@@ -179,7 +271,6 @@ def ensure_cache_dir_exists():
         raise
 
 import requests
-import re
 
 def _get_tickers_from_wiki(index_details: dict) -> list[str] | None:
     """
