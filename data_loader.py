@@ -16,6 +16,7 @@ from io import StringIO
 
 # Assuming config.py is in the same directory
 import config
+from ticker_utils import normalize_ticker_for_yfinance
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -27,10 +28,18 @@ async def fetch_history(ticker, period='1y', retries=2, backoff=1):
     Robust, truly asynchronous yfinance fetch.
     """
     loop = asyncio.get_running_loop()
+    fetch_ticker = normalize_ticker_for_yfinance(ticker)
     for attempt in range(retries + 1):
         try:
             # 1) Try yf.download
-            download_func = functools.partial(yf.download, ticker, period=period, threads=False, progress=False, auto_adjust=True)
+            download_func = functools.partial(
+                yf.download,
+                fetch_ticker,
+                period=period,
+                threads=False,
+                progress=False,
+                auto_adjust=True,
+            )
             df = await loop.run_in_executor(None, download_func)
 
             if df is not None and not df.empty:
@@ -42,7 +51,7 @@ async def fetch_history(ticker, period='1y', retries=2, backoff=1):
 
             # 2) Fallback to Ticker.history
             # yf.Ticker() itself can be slow, so run it in the executor too
-            ticker_func = functools.partial(yf.Ticker, ticker)
+            ticker_func = functools.partial(yf.Ticker, fetch_ticker)
             tk = await loop.run_in_executor(None, ticker_func)
             history_func = functools.partial(tk.history, period=period, auto_adjust=True)
             df2 = await loop.run_in_executor(None, history_func)
@@ -55,7 +64,10 @@ async def fetch_history(ticker, period='1y', retries=2, backoff=1):
                 return df2
 
         except Exception as e:
-            logger.warning(f"yfinance fetch error for {ticker} (attempt {attempt + 1}): {e}", exc_info=False)
+            logger.warning(
+                f"yfinance fetch error for {ticker} (attempt {attempt + 1}) using symbol {fetch_ticker}: {e}",
+                exc_info=False,
+            )
 
         if attempt < retries:
             wait_time = backoff * (2 ** attempt)

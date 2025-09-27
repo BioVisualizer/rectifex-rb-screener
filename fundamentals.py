@@ -12,6 +12,7 @@ import yfinance as yf
 # from curl_cffi.requests import AsyncSession # This was causing issues
 
 import config
+from ticker_utils import normalize_ticker_for_yfinance
 import time
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -25,14 +26,15 @@ async def _fetch_single_ticker_fundamentals(ticker: str) -> Optional[Dict[str, A
     loop = asyncio.get_running_loop()
     max_retries = 3
     base_wait_time = 2
+    fetch_ticker = normalize_ticker_for_yfinance(ticker)
     for attempt in range(max_retries):
         try:
             # yf.Ticker and .info are blocking calls, run in executor
-            stock = await loop.run_in_executor(None, yf.Ticker, ticker)
+            stock = await loop.run_in_executor(None, yf.Ticker, fetch_ticker)
             info = await loop.run_in_executor(None, getattr, stock, 'info')
 
             if not isinstance(info, dict) or not info:
-                logger.warning(f"No valid info dictionary returned for {ticker}, skipping.")
+                logger.warning(f"No valid info dictionary returned for {ticker} (queried as {fetch_ticker}), skipping.")
                 return None
 
             # Process the info dict to make it serializable and handle numpy arrays/series
