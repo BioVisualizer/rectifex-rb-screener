@@ -25,6 +25,21 @@ DEFAULT_SETTINGS = {
     "fc_volume_ratio_max": 0.70,
     "fc_min_avg_daily_volume": 500000,
     "fc_min_fund_score": 60,
+
+    # Fundamental Divergence Scenario Settings
+    "fundamental_divergence_params": {
+        "min_revenue_growth": 0.03,
+        "min_earnings_growth": 0.02,
+        "min_return_on_equity": 0.08,
+        "max_debt_to_equity": 2.0,
+        "lookback_days": 180,
+        "min_price_return_pct": -0.35,
+        "max_price_return_pct": 0.10,
+        "range_lookback_days": 60,
+        "max_range_pct": 0.30,
+        "min_metrics_to_pass": 2,
+        "min_avg_volume": 100000,
+    },
 }
 
 class SettingsManager:

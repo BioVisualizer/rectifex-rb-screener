@@ -249,8 +249,114 @@ class QualityPullbackScenario(BaseScenario):
 
 class FundamentalDivergenceScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
-        # This is a complex scenario. Using placeholder logic for now.
-        return None
+        params = settings.get('fundamental_divergence_params', {
+            "min_revenue_growth": 0.03,
+            "min_earnings_growth": 0.02,
+            "min_return_on_equity": 0.08,
+            "max_debt_to_equity": 2.0,
+            "lookback_days": 180,
+            "min_price_return_pct": -0.35,
+            "max_price_return_pct": 0.10,
+            "range_lookback_days": 60,
+            "max_range_pct": 0.30,
+            "min_metrics_to_pass": 2,
+            "min_avg_volume": 100000,
+        })
+
+        lookback_days = params.get('lookback_days', 180)
+        if stock_data is None or len(stock_data) < max(lookback_days, 60):
+            return None
+
+        # --- Check liquidity to avoid illiquid names ---
+        avg_volume_30d = stock_data['Volume'].iloc[-30:].mean() if 'Volume' in stock_data.columns and len(stock_data) >= 30 else None
+        if avg_volume_30d is None or pd.isna(avg_volume_30d) or avg_volume_30d < params.get('min_avg_volume', 0):
+            return None
+
+        # --- Fundamental strength signals (lenient: need only a subset to pass) ---
+        fundamentals_map = {
+            'revenueGrowth': (safe_get(stock_info, 'revenueGrowth'), params.get('min_revenue_growth', 0)),
+            'earningsGrowth': (safe_get(stock_info, 'earningsGrowth'), params.get('min_earnings_growth', 0)),
+            'returnOnEquity': (safe_get(stock_info, 'returnOnEquity'), params.get('min_return_on_equity', 0)),
+            'profitMargins': (safe_get(stock_info, 'profitMargins'), 0),
+        }
+        debt_to_equity = safe_get(stock_info, 'debtToEquity')
+
+        positive_metrics = 0
+        fundamentals_summary: Dict[str, Any] = {'name': stock_info.get('shortName', 'N/A')}
+
+        for metric, (value, threshold) in fundamentals_map.items():
+            if value is not None:
+                fundamentals_summary[metric] = value
+                if metric == 'profitMargins':
+                    if value > 0:
+                        positive_metrics += 1
+                elif value >= threshold:
+                    positive_metrics += 1
+
+        if debt_to_equity is not None:
+            fundamentals_summary['debtToEquity'] = debt_to_equity
+            if debt_to_equity <= params.get('max_debt_to_equity', float('inf')):
+                positive_metrics += 1
+
+        if positive_metrics < params.get('min_metrics_to_pass', 2):
+            return None
+
+        # --- Price behaviour checks: underperformance / stagnation ---
+        lookback_slice = stock_data.iloc[-lookback_days:]
+        start_close = lookback_slice['Close'].iloc[0]
+        latest_close = lookback_slice['Close'].iloc[-1]
+        if pd.isna(start_close) or pd.isna(latest_close) or start_close <= 0:
+            return None
+
+        price_return = (latest_close / start_close) - 1
+        if price_return > params.get('max_price_return_pct', 0.10) or price_return < params.get('min_price_return_pct', -0.35):
+            return None
+
+        high_in_period = lookback_slice['High'].max() if 'High' in lookback_slice.columns else lookback_slice['Close'].max()
+        drawdown_pct = None
+        if high_in_period and not pd.isna(high_in_period) and high_in_period > 0:
+            drawdown_pct = (latest_close / high_in_period) - 1
+
+        range_lookback = min(params.get('range_lookback_days', 60), len(stock_data))
+        recent_slice = stock_data.iloc[-range_lookback:]
+        recent_close_max = recent_slice['Close'].max()
+        recent_close_min = recent_slice['Close'].min()
+        recent_close_mean = recent_slice['Close'].mean()
+        price_range_pct = None
+        if recent_close_mean and not pd.isna(recent_close_mean) and recent_close_mean > 0:
+            price_range_pct = (recent_close_max - recent_close_min) / recent_close_mean
+
+        if price_range_pct is not None and price_range_pct > params.get('max_range_pct', 0.30):
+            return None
+
+        # --- Compute a simple rebound score emphasising fundamentals ---
+        max_possible_metrics = max(params.get('min_metrics_to_pass', 2), len(fundamentals_map) + 1)
+        score_base = 55
+        score = score_base + int(min(positive_metrics, max_possible_metrics) / max_possible_metrics * 40)
+        if drawdown_pct is not None and drawdown_pct < 0:
+            # Reward deeper discounts up to -35%
+            score += int(min(abs(drawdown_pct), 0.35) / 0.35 * 5)
+        score = max(50, min(score, 95))
+
+        technicals = {
+            'price': round(latest_close, 2),
+            '6m_return_pct': f"{price_return:.1%}",
+            'avg_volume_30d': int(avg_volume_30d) if avg_volume_30d is not None else None,
+        }
+        if drawdown_pct is not None:
+            technicals['drawdown_from_high'] = f"{drawdown_pct:.1%}"
+        if price_range_pct is not None:
+            technicals['range_pct'] = f"{price_range_pct:.1%}"
+
+        return ReboundCandidate(
+            ticker=stock_info.get('symbol'),
+            scenario=self._name,
+            rebound_score=score,
+            technical_score=score,
+            fundamentals=fundamentals_summary,
+            history_df=stock_data,
+            technicals=technicals,
+        )
 
 class VolatilitySqueezeScenario(BaseScenario):
     def run(self, stock_data: pd.DataFrame, stock_info: Dict) -> Optional[ReboundCandidate]:
