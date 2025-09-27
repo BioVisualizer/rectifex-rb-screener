@@ -25,7 +25,11 @@ logger = logging.getLogger(__name__)
 FAILURE_CACHE_EXPIRY_HOURS = getattr(config, "FAILED_HISTORY_CACHE_EXPIRY_HOURS", 6)
 _MINIMUM_HISTORY_PERIOD = getattr(config, "MINIMUM_HISTORY_PERIOD", None)
 _MIN_FALLBACK_HISTORY_DAYS = getattr(config, "MIN_FALLBACK_HISTORY_DAYS", 180)
-_REQUEST_THROTTLE_SECONDS = getattr(config, "YFINANCE_THROTTLE_SECONDS", 0.0)
+_MINIMUM_THROTTLE_SECONDS = 1.0
+_REQUEST_THROTTLE_SECONDS = max(
+    getattr(config, "YFINANCE_THROTTLE_SECONDS", _MINIMUM_THROTTLE_SECONDS),
+    _MINIMUM_THROTTLE_SECONDS,
+)
 _last_failed_tickers: Dict[str, Dict[str, str]] = {}
 
 
@@ -69,7 +73,7 @@ def _build_history_kwargs(period: str | None) -> Dict[str, object]:
     """Centralise kwargs used for yfinance history downloads."""
     kwargs: Dict[str, object] = {
         "interval": "1d",
-        "auto_adjust": False,
+        "auto_adjust": True,
         "actions": False,
         "prepost": False,
     }
