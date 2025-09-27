@@ -390,7 +390,8 @@ class ScenarioRunner:
                     return None
                 # Use a short period and fewer retries for a quick check.
                 # fetch_history is already async, so we can await it directly.
-                df, _ = await data_loader.fetch_history(ticker=ticker, period="1mo", retries=1)
+                validation_period = getattr(config, "VALIDATION_HISTORY_PERIOD", "6mo")
+                df, _ = await data_loader.fetch_history(ticker=ticker, period=validation_period, retries=1)
                 return ticker if df is not None and not df.empty else None
 
         semaphore = asyncio.Semaphore(20)  # Use higher concurrency for these quick checks

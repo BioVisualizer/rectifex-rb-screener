@@ -23,6 +23,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 FAILURE_CACHE_EXPIRY_HOURS = getattr(config, "FAILED_HISTORY_CACHE_EXPIRY_HOURS", 6)
+_MINIMUM_HISTORY_PERIOD = getattr(config, "MINIMUM_HISTORY_PERIOD", None)
+_MIN_FALLBACK_HISTORY_DAYS = getattr(config, "MIN_FALLBACK_HISTORY_DAYS", 180)
+_REQUEST_THROTTLE_SECONDS = getattr(config, "YFINANCE_THROTTLE_SECONDS", 0.0)
 _last_failed_tickers: Dict[str, Dict[str, str]] = {}
 
 
@@ -82,7 +85,24 @@ async def fetch_history(ticker, period='1y', retries=2, backoff=1) -> Tuple[pd.D
     last_error: str | None = None
     attempts = 0
 
-    history_kwargs = _build_history_kwargs(period)
+    requested_period = period
+    effective_period = period
+    if _MINIMUM_HISTORY_PERIOD:
+        min_period_delta = _period_to_timedelta(_MINIMUM_HISTORY_PERIOD)
+        if not effective_period:
+            effective_period = _MINIMUM_HISTORY_PERIOD
+        else:
+            current_delta = _period_to_timedelta(effective_period)
+            if current_delta < min_period_delta:
+                logger.debug(
+                    "Extending history request for %s from %s to %s to ensure sufficient data.",
+                    ticker,
+                    effective_period,
+                    _MINIMUM_HISTORY_PERIOD,
+                )
+                effective_period = _MINIMUM_HISTORY_PERIOD
+
+    history_kwargs = _build_history_kwargs(effective_period)
     fallback_context: Dict[str, str] | None = None
 
     for attempt in range(retries + 1):
@@ -130,9 +150,13 @@ async def fetch_history(ticker, period='1y', retries=2, backoff=1) -> Tuple[pd.D
                 history_kwargs,
             )
 
-            if period:
+            if effective_period or _MIN_FALLBACK_HISTORY_DAYS:
                 fallback_end = (datetime.utcnow() - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-                fallback_start = fallback_end - _period_to_timedelta(period)
+                fallback_span = max(
+                    _period_to_timedelta(effective_period) if effective_period else timedelta(days=_MIN_FALLBACK_HISTORY_DAYS),
+                    timedelta(days=_MIN_FALLBACK_HISTORY_DAYS),
+                )
+                fallback_start = fallback_end - fallback_span
                 if fallback_start >= fallback_end:
                     fallback_start = fallback_end - timedelta(days=7)
                 fallback_kwargs = _build_history_kwargs(None)
@@ -143,6 +167,7 @@ async def fetch_history(ticker, period='1y', retries=2, backoff=1) -> Tuple[pd.D
                 fallback_context = {
                     "fallback_start": fallback_start.isoformat(),
                     "fallback_end": fallback_end.isoformat(),
+                    "fallback_span_days": fallback_span.days,
                 }
                 logger.debug(
                     "Retrying %s with explicit date range start=%s end=%s",
@@ -177,6 +202,9 @@ async def fetch_history(ticker, period='1y', retries=2, backoff=1) -> Tuple[pd.D
                 logger.info(log_message)
             else:
                 logger.warning(log_message)
+        finally:
+            if _REQUEST_THROTTLE_SECONDS and _REQUEST_THROTTLE_SECONDS > 0:
+                await asyncio.sleep(_REQUEST_THROTTLE_SECONDS)
 
         if attempt < retries:
             if last_error and _is_non_retriable_error(last_error):
@@ -197,7 +225,8 @@ async def fetch_history(ticker, period='1y', retries=2, backoff=1) -> Tuple[pd.D
         "symbol": fetch_ticker,
         "attempts": attempts,
         "non_retriable": bool(last_error and _is_non_retriable_error(last_error)),
-        "requested_period": period,
+        "requested_period": requested_period,
+        "effective_period": effective_period,
     }
     if fallback_context:
         failure_details.update(fallback_context)

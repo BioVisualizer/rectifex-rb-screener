@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 
 # Pre-compile a regex for share-class tickers that Yahoo expects with hyphen.
-_SHARE_CLASS_PATTERN = re.compile(r"^(?P<base>[A-Z0-9]+)\.(?P<class>[A-Z])$")
+# Require the base symbol to start with a letter so exchange suffixes like ``4188.T``
+# are not mis-identified as share classes.
+_SHARE_CLASS_PATTERN = re.compile(r"^(?P<base>[A-Z]+[A-Z0-9]*)\.(?P<class>[A-Z])$")
 
 
 def normalize_ticker_for_yfinance(ticker: str) -> str:
