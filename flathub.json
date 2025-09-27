@@ -51,6 +51,7 @@
                 "install -D scenarios.json /app/scenarios.json",
                 "install -D rebound_scenarios.py /app/rebound_scenarios.py",
                 "install -D data_loader.py /app/data_loader.py",
+                "install -D ticker_utils.py /app/ticker_utils.py",
                 "install -D ticker_manager.py /app/ticker_manager.py",
                 "install -D config.py /app/config.py",
                 "install -D settings_manager.py /app/settings_manager.py",
